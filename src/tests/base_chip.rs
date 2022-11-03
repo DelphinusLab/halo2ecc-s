@@ -1,4 +1,4 @@
-use crate::circuit::base_chip::{BaseChip, BaseChipConfig, MUL_COLUMNS, VAR_COLUMNS};
+use crate::circuit::base_chip::{BaseChip, BaseChipConfig, BaseGateOps, MUL_COLUMNS, VAR_COLUMNS};
 use crate::context::Context;
 use crate::pair;
 use ark_std::{end_timer, start_timer};
@@ -45,7 +45,7 @@ impl<N: FieldExt> TestBaseChipCircuit<N> {
         N::random(rng)
     }
 
-    fn setup_test_one_line_single_thread(&self, base_chip: &BaseChip<N>, ctx: &Context<N>) {
+    fn setup_test_one_line_single_thread(&self, ctx: &Context<N>) {
         let vars = [(); VAR_COLUMNS].map(|_| Self::random());
         let coeffs = [(); VAR_COLUMNS].map(|_| Self::random());
         let muls_coeffs = [(); MUL_COLUMNS].map(|_| Self::random());
@@ -63,13 +63,11 @@ impl<N: FieldExt> TestBaseChipCircuit<N> {
             result + next_var * next_coeff
         };
 
-        let record = &mut ctx.records.lock().unwrap();
+        let ctx = &mut ctx.clone();
 
         let timer = start_timer!(|| "setup");
-        for i in 0..10000 {
-            base_chip.one_line(
-                record,
-                i * 2,
+        for _ in 0..10000 {
+            ctx.one_line(
                 (0..VAR_COLUMNS)
                     .map(|i| pair!(vars[i], coeffs[i]))
                     .collect(),
@@ -77,19 +75,13 @@ impl<N: FieldExt> TestBaseChipCircuit<N> {
                 (muls_coeffs.to_vec(), Some(next_coeff)),
             );
 
-            base_chip.one_line_with_last(
-                record,
-                i * 2 + 1,
-                vec![],
-                pair!(next_var, N::zero()),
-                None,
-                (vec![], None),
-            );
+            ctx.one_line_with_last(vec![], pair!(next_var, N::zero()), None, (vec![], None));
         }
+
         end_timer!(timer);
     }
 
-    fn setup_test_one_line_multi_thread(&self, base_chip: BaseChip<N>, ctx: &Context<N>) {
+    fn setup_test_one_line_multi_thread(&self, ctx: &Context<N>) {
         let vars = [(); VAR_COLUMNS].map(|_| Self::random());
         let coeffs = [(); VAR_COLUMNS].map(|_| Self::random());
         let muls_coeffs = [(); MUL_COLUMNS].map(|_| Self::random());
@@ -108,20 +100,16 @@ impl<N: FieldExt> TestBaseChipCircuit<N> {
         };
 
         let timer = start_timer!(|| "setup");
-
         let c = 10000;
         let n = 10;
         for i in 0..n {
-            let record = std::sync::Arc::clone(&ctx.records);
-            let base_chip = base_chip.clone();
+            let step = c / n;
+            let start = i * step * 2;
+            let mut ctx = ctx.clone();
+            *ctx.base_offset = start;
             std::thread::spawn(move || {
-                let record = &mut record.lock().unwrap();
-                let step = c / n;
-                let start = i * step;
-                for i in start..start + step {
-                    base_chip.one_line(
-                        record,
-                        i * 2,
+                for _ in 0..step {
+                    ctx.one_line(
                         (0..VAR_COLUMNS)
                             .map(|i| pair!(vars[i], coeffs[i]))
                             .collect(),
@@ -129,9 +117,7 @@ impl<N: FieldExt> TestBaseChipCircuit<N> {
                         (muls_coeffs.to_vec(), Some(next_coeff)),
                     );
 
-                    base_chip.one_line_with_last(
-                        record,
-                        i * 2 + 1,
+                    ctx.one_line_with_last(
                         vec![],
                         pair!(next_var, N::zero()),
                         None,
@@ -169,10 +155,10 @@ impl<N: FieldExt> Circuit<N> for TestBaseChipCircuit<N> {
         let mut ctx = Context::new();
         match self.test_case {
             TestCase::OneLineSingleThread => {
-                self.setup_test_one_line_single_thread(&base_chip, &mut ctx);
+                self.setup_test_one_line_single_thread(&mut ctx);
             }
             TestCase::OneLineMultiThread => {
-                self.setup_test_one_line_multi_thread(base_chip.clone(), &mut ctx);
+                self.setup_test_one_line_multi_thread(&mut ctx);
             }
         }
 

@@ -31,19 +31,31 @@ impl Cell {
 #[derive(Debug, Copy, Clone)]
 pub struct AssignedValue<N: FieldExt> {
     pub cell: Cell,
-    pub val: Option<N>,
+    pub val: N,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AssignedCondition<N: FieldExt>(pub AssignedValue<N>);
+
+impl<'a, N: FieldExt> AssignedValue<N> {
+    pub fn new(region: Chip, col: usize, row: usize, val: N) -> Self {
+        Self {
+            cell: Cell::new(region, col, row),
+            val,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum ValueSchema<'a, N: FieldExt> {
     Assigned(&'a AssignedValue<N>),
-    Unassigned(Option<N>),
+    Unassigned(N),
 }
 
 impl<'a, N: FieldExt> ValueSchema<'a, N> {
-    pub fn value(self) -> Option<N> {
+    pub fn value(self) -> N {
         match self {
-            ValueSchema::Assigned(v) => v.val.clone(),
+            ValueSchema::Assigned(v) => v.val,
             ValueSchema::Unassigned(v) => v,
         }
     }
@@ -65,12 +77,6 @@ macro_rules! pair {
 
 impl<'a, N: FieldExt> From<N> for ValueSchema<'a, N> {
     fn from(v: N) -> Self {
-        Self::Unassigned(Some(v))
-    }
-}
-
-impl<'a, N: FieldExt> From<Option<N>> for ValueSchema<'a, N> {
-    fn from(v: Option<N>) -> Self {
         Self::Unassigned(v)
     }
 }
@@ -84,16 +90,16 @@ impl<'a, N: FieldExt> From<&'a AssignedValue<N>> for ValueSchema<'a, N> {
 #[derive(Debug, Clone)]
 pub struct Context<N: FieldExt> {
     pub records: Arc<Mutex<Records<N>>>,
-    pub base_offset: usize,
-    pub range_ofset: usize,
+    pub base_offset: Box<usize>,
+    pub range_ofset: Box<usize>,
 }
 
 impl<N: FieldExt> Context<N> {
     pub fn new() -> Self {
         Self {
             records: Arc::new(Mutex::new(Records::default())),
-            base_offset: 0,
-            range_ofset: 0,
+            base_offset: Box::new(0),
+            range_ofset: Box::new(0),
         }
     }
 }
@@ -104,6 +110,7 @@ pub struct Records<N: FieldExt> {
     pub fix_record: Vec<[Option<N>; FIXED_COLUMNS]>,
     pub permutations: Vec<(Cell, Cell)>,
     pub adv_cell: Vec<[Option<AssignedCell<N, N>>; VAR_COLUMNS]>,
+    pub height: usize,
 }
 
 impl<N: FieldExt> Records<N> {
@@ -113,6 +120,8 @@ impl<N: FieldExt> Records<N> {
         base_chip: &BaseChip<N>,
     ) -> Result<(), Error> {
         let mut cell_cache = HashMap::new();
+        self.adv_record.truncate(self.height);
+        self.fix_record.truncate(self.height);
 
         for (row, advs) in self.adv_record.iter_mut().enumerate() {
             for (col, adv) in advs.iter_mut().enumerate() {
@@ -155,5 +164,81 @@ impl<N: FieldExt> Records<N> {
         }
 
         Ok(())
+    }
+
+    pub fn one_line(
+        &mut self,
+        offset: usize,
+        base_coeff_pairs: Vec<(ValueSchema<N>, N)>,
+        constant: Option<N>,
+        mul_next_coeffs: (Vec<N>, Option<N>),
+    ) {
+        assert!(base_coeff_pairs.len() <= VAR_COLUMNS);
+
+        const EXTEND_SIZE: usize = 16;
+
+        if offset <= self.adv_record.len() {
+            let adv_default = (None, false);
+            let to_len = (offset + EXTEND_SIZE) & !(EXTEND_SIZE - 1);
+            self.adv_record.resize(to_len, [adv_default; VAR_COLUMNS]);
+            self.fix_record.resize(to_len, [None; FIXED_COLUMNS]);
+        }
+
+        if offset >= self.height {
+            self.height = offset + 1;
+        }
+
+        for (i, (base, coeff)) in base_coeff_pairs.into_iter().enumerate() {
+            match base.cell() {
+                Some(cell) => {
+                    self.permutations
+                        .push((cell, Cell::new(Chip::BaseChip, i, offset)));
+                    self.adv_record[offset][i].1 = true;
+                }
+                _ => {}
+            }
+            self.fix_record[offset][i] = Some(coeff);
+            self.adv_record[offset][i].0 = Some(base.value());
+        }
+
+        let (mul_coeffs, next) = mul_next_coeffs;
+        for (i, mul_coeff) in mul_coeffs.into_iter().enumerate() {
+            self.fix_record[offset][VAR_COLUMNS + i] = Some(mul_coeff);
+        }
+
+        if next.is_some() {
+            self.fix_record[offset][VAR_COLUMNS + MUL_COLUMNS] = next;
+        }
+
+        if constant.is_some() {
+            self.fix_record[offset][VAR_COLUMNS + MUL_COLUMNS + 1] = constant;
+        }
+    }
+
+    pub fn one_line_with_last(
+        &mut self,
+        offset: usize,
+        base_coeff_pairs: Vec<(ValueSchema<N>, N)>,
+        tail: (ValueSchema<N>, N),
+        constant: Option<N>,
+        mul_next_coeffs: (Vec<N>, Option<N>),
+    ) {
+        assert!(base_coeff_pairs.len() <= VAR_COLUMNS - 1);
+
+        self.one_line(offset, base_coeff_pairs, constant, mul_next_coeffs);
+
+        let (base, coeff) = tail;
+
+        let i = VAR_COLUMNS - 1;
+        match base.cell() {
+            Some(cell) => {
+                self.permutations
+                    .push((cell, Cell::new(Chip::BaseChip, i, offset)));
+                self.adv_record[offset][i].1 = true;
+            }
+            _ => {}
+        }
+        self.fix_record[offset][i] = Some(coeff);
+        self.adv_record[offset][i].0 = Some(base.value());
     }
 }
