@@ -1,0 +1,19 @@
+[package]
+name = "halo2ecc-s"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+halo2_proofs = { git = "https://github.com/junyu0312/halo2.git", branch = "gpu", default-features = true }
+num-integer = "0.1"
+num-bigint = { version = "0.4", features = ["rand"] }
+rayon = "1.5.2"
+
+[dev-dependencies]
+chrono = "0.4.19"
+rand = "0.8"
+rand_xorshift = "0.3"
+ark-std = { version = "0.3", features = ["print-trace"] }
