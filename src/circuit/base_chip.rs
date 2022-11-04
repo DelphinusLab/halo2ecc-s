@@ -78,7 +78,7 @@ impl<N: FieldExt> BaseChip<N> {
     }
 }
 
-pub trait BaseGateOps<N: FieldExt> {
+pub trait BaseChipOps<N: FieldExt> {
     fn var_columns(&mut self) -> usize;
     fn mul_columns(&mut self) -> usize;
 
@@ -454,7 +454,7 @@ pub trait BaseGateOps<N: FieldExt> {
     }
 }
 
-impl<N: FieldExt> BaseGateOps<N> for Context<N> {
+impl<N: FieldExt> BaseChipOps<N> for Context<N> {
     fn var_columns(&mut self) -> usize {
         VAR_COLUMNS
     }

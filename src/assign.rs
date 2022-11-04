@@ -1,4 +1,8 @@
+use std::marker::PhantomData;
+
 use halo2_proofs::arithmetic::FieldExt;
+
+use crate::range_info::LIMBS;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Chip {
@@ -23,6 +27,25 @@ impl Cell {
 pub struct AssignedValue<N: FieldExt> {
     pub cell: Cell,
     pub val: N,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AssignedInteger<W: FieldExt, N: FieldExt> {
+    pub limbs_le: [AssignedValue<N>; LIMBS],
+    pub native: AssignedValue<N>,
+    pub times: usize,
+    _mark: PhantomData<W>,
+}
+
+impl<W: FieldExt, N: FieldExt> AssignedInteger<W, N> {
+    pub fn new(limbs_le: [AssignedValue<N>; LIMBS], native: AssignedValue<N>, times: usize) -> Self {
+        Self {
+            limbs_le,
+            native,
+            times: 1,
+            _mark: PhantomData,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

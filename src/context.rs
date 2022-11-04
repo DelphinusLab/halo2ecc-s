@@ -22,7 +22,7 @@ pub struct Context<N: FieldExt> {
     pub records: Arc<Mutex<Records<N>>>,
     pub base_offset: Box<usize>,
     pub range_offset: Box<usize>,
-    pub range_info: Option<RangeInfo<N>>,
+    pub range_info: Option<Arc<RangeInfo<N>>>,
 }
 
 impl<N: FieldExt> Context<N> {
@@ -40,7 +40,7 @@ impl<N: FieldExt> Context<N> {
             records: Arc::new(Mutex::new(Records::default())),
             base_offset: Box::new(0),
             range_offset: Box::new(0),
-            range_info: Some(RangeInfo::<N>::new::<W>()),
+            range_info: Some(Arc::new(RangeInfo::<N>::new::<W>())),
         }
     }
 }

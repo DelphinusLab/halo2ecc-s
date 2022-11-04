@@ -7,7 +7,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use num_bigint::BigUint;
-use std::{marker::PhantomData, vec};
+use std::{marker::PhantomData, sync::Arc, vec};
 
 const CLASS_SHIFT_BITS: usize = 128;
 
@@ -124,7 +124,7 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
 }
 
 pub trait RangeChipOps<N: FieldExt> {
-    fn info(&self) -> &RangeInfo<N>;
+    fn info(&self) -> Arc<RangeInfo<N>>;
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N>;
     fn assign_nonleading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
     fn assign_w_ceil_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
@@ -145,8 +145,8 @@ fn decompose_bn<N: FieldExt>(bn: &BigUint, n: usize, mask: &BigUint) -> (N, Vec<
 }
 
 impl<N: FieldExt> RangeChipOps<N> for Context<N> {
-    fn info(&self) -> &RangeInfo<N> {
-        self.range_info.as_ref().unwrap()
+    fn info(&self) -> Arc<RangeInfo<N>> {
+        self.range_info.clone().unwrap()
     }
 
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N> {

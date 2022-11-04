@@ -1,4 +1,4 @@
-use crate::circuit::base_chip::{BaseChip, BaseChipConfig, BaseGateOps, MUL_COLUMNS, VAR_COLUMNS};
+use crate::circuit::base_chip::{BaseChip, BaseChipConfig, BaseChipOps, MUL_COLUMNS, VAR_COLUMNS};
 use crate::context::Context;
 use crate::context::Records;
 use crate::pair;

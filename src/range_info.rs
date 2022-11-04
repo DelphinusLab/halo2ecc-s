@@ -2,15 +2,18 @@ use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigUint;
 use std::marker::PhantomData;
 
-use crate::utils::field_to_bn;
+use crate::utils::{bn_to_field, field_to_bn};
 
 pub const COMMON_RANGE_BITS: usize = 18;
 pub const W_CEIL_LEADING_CHUNKS: usize = 5;
 pub const N_FLOOR_LEADING_CHUNKS: usize = 5;
 pub const D_LEADING_CHUNKS: usize = 5;
 pub const MAX_CHUNKS: usize = 5;
+pub const LIMBS: usize = 3;
+pub const LIMB_BITS: usize = MAX_CHUNKS * COMMON_RANGE_BITS;
 
 pub const OVERFLOW_BITS: usize = 5;
+pub const OVERFLOW_THRESHOLD: usize = 1<< (OVERFLOW_BITS - 1);
 
 #[derive(Copy, Clone)]
 pub enum RangeClass {
@@ -27,6 +30,8 @@ pub struct RangeInfo<N: FieldExt> {
     pub n_floor_leading_bits: usize,
 
     pub common_range_mask: BigUint,
+    pub limb_mask: BigUint,
+    pub limb_coeffs: [N; LIMBS],
     pub _phantom: PhantomData<N>,
 }
 
@@ -85,7 +90,17 @@ impl<N: FieldExt> RangeInfo<N> {
             d_leading_bits,
             w_ceil_leading_bits,
             n_floor_leading_bits,
+
             common_range_mask: BigUint::from((1u64 << COMMON_RANGE_BITS) - 1),
+            limb_mask: (BigUint::from(1u64) << LIMB_BITS) - 1u64,
+
+            limb_coeffs: (0..LIMBS)
+                .into_iter()
+                .map(|i| bn_to_field(&(BigUint::from(1u64) << (i * LIMB_BITS))))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+
             _phantom: PhantomData,
         }
     }
