@@ -1,5 +1,6 @@
 use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigUint;
+use num_integer::Integer;
 use std::marker::PhantomData;
 
 use crate::utils::{bn_to_field, field_to_bn};
@@ -13,7 +14,8 @@ pub const LIMBS: usize = 3;
 pub const LIMB_BITS: usize = MAX_CHUNKS * COMMON_RANGE_BITS;
 
 pub const OVERFLOW_BITS: usize = 5;
-pub const OVERFLOW_THRESHOLD: usize = 1<< (OVERFLOW_BITS - 1);
+pub const OVERFLOW_LIMIT: usize = 1 << OVERFLOW_BITS;
+pub const OVERFLOW_THRESHOLD: usize = 1 << (OVERFLOW_BITS - 1);
 
 #[derive(Copy, Clone)]
 pub enum RangeClass {
@@ -25,17 +27,35 @@ pub enum RangeClass {
 
 #[derive(Debug, Clone)]
 pub struct RangeInfo<N: FieldExt> {
+    pub w_ceil_bits: usize,
+
     pub d_leading_bits: usize,
     pub w_ceil_leading_bits: usize,
     pub n_floor_leading_bits: usize,
 
+    pub w_ceil_modulus: BigUint,
+    pub n_modulus: BigUint,
+    pub w_modulus: BigUint,
     pub common_range_mask: BigUint,
     pub limb_mask: BigUint,
+    pub limb_modulus: BigUint,
+
+    pub w_modulus_limbs_le: [N; LIMBS],
     pub limb_coeffs: [N; LIMBS],
+
+    pub w_native: N,
+
     pub _phantom: PhantomData<N>,
 }
 
 impl<N: FieldExt> RangeInfo<N> {
+    pub fn pre_check(&self) {
+        // for pure_w_check, lcm(limb, native) >= w_ceil
+        let limb_modulus = &self.limb_modulus;
+        let lcm = self.n_modulus.lcm(&limb_modulus);
+        assert!(lcm >= self.w_ceil_modulus);
+    }
+
     pub fn d_bits<W: FieldExt>() -> usize {
         // a * b = w * d + rem
 
@@ -86,14 +106,29 @@ impl<N: FieldExt> RangeInfo<N> {
         );
         assert!(d_leading_bits != 0);
 
-        Self {
+        let limb_mask = (BigUint::from(1u64) << LIMB_BITS) - 1u64;
+        let n_modulus = &n_max + 1u64;
+        let w_modulus = &w_max + 1u64;
+        let w_native = &w_modulus % &n_modulus;
+        let w_modulus_limbs_le = (0..LIMBS)
+            .into_iter()
+            .map(|i| bn_to_field(&((&w_modulus >> (i * LIMB_BITS)) & &limb_mask)))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let res = Self {
+            w_ceil_bits,
             d_leading_bits,
             w_ceil_leading_bits,
             n_floor_leading_bits,
 
+            w_ceil_modulus: BigUint::from(1u64) << w_ceil_bits,
+            n_modulus,
+            w_modulus,
             common_range_mask: BigUint::from((1u64 << COMMON_RANGE_BITS) - 1),
-            limb_mask: (BigUint::from(1u64) << LIMB_BITS) - 1u64,
-
+            limb_mask,
+            limb_modulus: (BigUint::from(1u64) << LIMB_BITS),
             limb_coeffs: (0..LIMBS)
                 .into_iter()
                 .map(|i| bn_to_field(&(BigUint::from(1u64) << (i * LIMB_BITS))))
@@ -101,7 +136,43 @@ impl<N: FieldExt> RangeInfo<N> {
                 .try_into()
                 .unwrap(),
 
+            w_modulus_limbs_le,
+            w_native: bn_to_field::<N>(&w_native),
+
             _phantom: PhantomData,
+        };
+
+        res.pre_check();
+        res
+    }
+
+    pub fn w_to_limb_n_le(&self, w: &BigUint) -> [N; LIMBS] {
+        (0..LIMBS)
+            .into_iter()
+            .map(|i| bn_to_field(&((w >> (i * LIMB_BITS)) & &self.limb_mask)))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn find_w_modulus_ceil(&self, times: usize) -> [N; LIMBS] {
+        let max = (times + 1) * (BigUint::from(1u64) << self.w_ceil_bits);
+        let (n, rem) = max.div_rem(&self.w_modulus);
+        let n = if rem.gt(&BigUint::from(0u64)) {
+            n + 1u64
+        } else {
+            n
+        };
+
+        let mut upper = n * &self.w_modulus;
+
+        let mut limbs = vec![];
+        for _ in 0..LIMBS - 1 {
+            let rem = (&upper & &self.limb_mask) + times * &self.limb_modulus;
+            upper = (upper - &rem) >> LIMB_BITS;
+            limbs.push(bn_to_field::<N>(&rem));
         }
+        limbs.push(bn_to_field::<N>(&upper));
+        limbs.try_into().unwrap()
     }
 }

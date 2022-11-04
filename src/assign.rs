@@ -38,11 +38,15 @@ pub struct AssignedInteger<W: FieldExt, N: FieldExt> {
 }
 
 impl<W: FieldExt, N: FieldExt> AssignedInteger<W, N> {
-    pub fn new(limbs_le: [AssignedValue<N>; LIMBS], native: AssignedValue<N>, times: usize) -> Self {
+    pub fn new(
+        limbs_le: [AssignedValue<N>; LIMBS],
+        native: AssignedValue<N>,
+        times: usize,
+    ) -> Self {
         Self {
             limbs_le,
             native,
-            times: 1,
+            times,
             _mark: PhantomData,
         }
     }
