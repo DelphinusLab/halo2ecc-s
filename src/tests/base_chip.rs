@@ -1,6 +1,8 @@
 use crate::circuit::base_chip::{BaseChip, BaseChipConfig, BaseGateOps, MUL_COLUMNS, VAR_COLUMNS};
 use crate::context::Context;
+use crate::context::Records;
 use crate::pair;
+use crate::tests::random_fr;
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::pairing::bn256::Fr;
@@ -9,20 +11,8 @@ use halo2_proofs::{
     dev::MockProver,
     plonk::{Circuit, ConstraintSystem, Error},
 };
-use rand::SeedableRng;
-use rand_xorshift::XorShiftRng;
 use std::marker::PhantomData;
-
-enum TestCase {
-    OneLineSingleThread,
-    OneLineMultiThread,
-}
-
-impl Default for TestCase {
-    fn default() -> TestCase {
-        TestCase::OneLineSingleThread
-    }
-}
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct TestBaseChipConfig {
@@ -30,109 +20,12 @@ struct TestBaseChipConfig {
 }
 
 #[derive(Default)]
-struct TestBaseChipCircuit<N: FieldExt> {
-    test_case: TestCase,
+struct TestCircuit<N: FieldExt> {
+    records: Records<N>,
     _phantom: PhantomData<N>,
 }
 
-impl<N: FieldExt> TestBaseChipCircuit<N> {
-    fn random() -> N {
-        let seed = chrono::offset::Utc::now()
-            .timestamp_nanos()
-            .try_into()
-            .unwrap();
-        let rng = XorShiftRng::seed_from_u64(seed);
-        N::random(rng)
-    }
-
-    fn setup_test_one_line_single_thread(&self, ctx: &Context<N>) {
-        let vars = [(); VAR_COLUMNS].map(|_| Self::random());
-        let coeffs = [(); VAR_COLUMNS].map(|_| Self::random());
-        let muls_coeffs = [(); MUL_COLUMNS].map(|_| Self::random());
-        let next_var = Self::random();
-        let next_coeff = Self::random();
-
-        let result = {
-            let mut result = N::zero();
-            for i in 0..VAR_COLUMNS {
-                result = result + vars[i] * coeffs[i]
-            }
-            for i in 0..MUL_COLUMNS {
-                result = result + muls_coeffs[i] * vars[i * 2] * vars[i * 2 + 1]
-            }
-            result + next_var * next_coeff
-        };
-
-        let ctx = &mut ctx.clone();
-
-        let timer = start_timer!(|| "setup");
-        for _ in 0..10000 {
-            ctx.one_line(
-                (0..VAR_COLUMNS)
-                    .map(|i| pair!(vars[i], coeffs[i]))
-                    .collect(),
-                Some(-result),
-                (muls_coeffs.to_vec(), Some(next_coeff)),
-            );
-
-            ctx.one_line_with_last(vec![], pair!(next_var, N::zero()), None, (vec![], None));
-        }
-
-        end_timer!(timer);
-    }
-
-    fn setup_test_one_line_multi_thread(&self, ctx: &Context<N>) {
-        let vars = [(); VAR_COLUMNS].map(|_| Self::random());
-        let coeffs = [(); VAR_COLUMNS].map(|_| Self::random());
-        let muls_coeffs = [(); MUL_COLUMNS].map(|_| Self::random());
-        let next_var = Self::random();
-        let next_coeff = Self::random();
-
-        let result = {
-            let mut result = N::zero();
-            for i in 0..VAR_COLUMNS {
-                result = result + vars[i] * coeffs[i]
-            }
-            for i in 0..MUL_COLUMNS {
-                result = result + muls_coeffs[i] * vars[i * 2] * vars[i * 2 + 1]
-            }
-            result + next_var * next_coeff
-        };
-
-        let timer = start_timer!(|| "setup");
-        let c = 10000;
-        let n = 10;
-        for i in 0..n {
-            let step = c / n;
-            let start = i * step * 2;
-            let mut ctx = ctx.clone();
-            *ctx.base_offset = start;
-            std::thread::spawn(move || {
-                for _ in 0..step {
-                    ctx.one_line(
-                        (0..VAR_COLUMNS)
-                            .map(|i| pair!(vars[i], coeffs[i]))
-                            .collect(),
-                        Some(-result),
-                        (muls_coeffs.to_vec(), Some(next_coeff)),
-                    );
-
-                    ctx.one_line_with_last(
-                        vec![],
-                        pair!(next_var, N::zero()),
-                        None,
-                        (vec![], None),
-                    );
-                }
-            })
-            .join()
-            .unwrap();
-        }
-        end_timer!(timer);
-    }
-}
-
-impl<N: FieldExt> Circuit<N> for TestBaseChipCircuit<N> {
+impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     type Config = TestBaseChipConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -152,24 +45,11 @@ impl<N: FieldExt> Circuit<N> for TestBaseChipCircuit<N> {
     ) -> Result<(), Error> {
         let base_chip = BaseChip::new(config.base_chip_config);
 
-        let mut ctx = Context::new();
-        match self.test_case {
-            TestCase::OneLineSingleThread => {
-                self.setup_test_one_line_single_thread(&mut ctx);
-            }
-            TestCase::OneLineMultiThread => {
-                self.setup_test_one_line_multi_thread(&mut ctx);
-            }
-        }
-
         layouter.assign_region(
             || "base",
             |mut region| {
                 let timer = start_timer!(|| "assign");
-                ctx.records
-                    .lock()
-                    .unwrap()
-                    .assign_all(&mut region, &base_chip)?;
+                self.records.assign_all_in_base(&mut region, &base_chip)?;
                 end_timer!(timer);
                 Ok(())
             },
@@ -181,9 +61,45 @@ impl<N: FieldExt> Circuit<N> for TestBaseChipCircuit<N> {
 
 #[test]
 fn test_one_line_st() {
+    let vars = [(); VAR_COLUMNS].map(|_| random_fr());
+    let coeffs = [(); VAR_COLUMNS].map(|_| random_fr());
+    let muls_coeffs = [(); MUL_COLUMNS].map(|_| random_fr());
+    let next_var = random_fr();
+    let next_coeff = random_fr();
+
+    let result: Fr = {
+        let mut result = Fr::zero();
+        for i in 0..VAR_COLUMNS {
+            result = result + vars[i] * coeffs[i]
+        }
+        for i in 0..MUL_COLUMNS {
+            result = result + muls_coeffs[i] * vars[i * 2] * vars[i * 2 + 1]
+        }
+        result + next_var * next_coeff
+    };
+
+    let ctx = Context::new();
+    {
+        let ctx = &mut ctx.clone();
+
+        let timer = start_timer!(|| "setup");
+        for _ in 0..10000 {
+            ctx.one_line(
+                (0..VAR_COLUMNS)
+                    .map(|i| pair!(vars[i], coeffs[i]))
+                    .collect(),
+                Some(-result),
+                (muls_coeffs.to_vec(), Some(next_coeff)),
+            );
+
+            ctx.one_line_with_last(vec![], pair!(next_var, Fr::zero()), None, (vec![], None));
+        }
+        end_timer!(timer);
+    }
+
     const K: u32 = 16;
-    let circuit = TestBaseChipCircuit::<Fr> {
-        test_case: TestCase::OneLineSingleThread,
+    let circuit = TestCircuit::<Fr> {
+        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
         _phantom: PhantomData,
     };
     let prover = match MockProver::run(K, &circuit, vec![]) {
@@ -195,9 +111,58 @@ fn test_one_line_st() {
 
 #[test]
 fn test_one_line_mt() {
+    let vars = [(); VAR_COLUMNS].map(|_| random_fr());
+    let coeffs = [(); VAR_COLUMNS].map(|_| random_fr());
+    let muls_coeffs = [(); MUL_COLUMNS].map(|_| random_fr());
+    let next_var = random_fr();
+    let next_coeff = random_fr();
+
+    let result = {
+        let mut result = Fr::zero();
+        for i in 0..VAR_COLUMNS {
+            result = result + vars[i] * coeffs[i]
+        }
+        for i in 0..MUL_COLUMNS {
+            result = result + muls_coeffs[i] * vars[i * 2] * vars[i * 2 + 1]
+        }
+        result + next_var * next_coeff
+    };
+
+    let mut threads = vec![];
+
+    let timer = start_timer!(|| "setup");
+    let c = 10000;
+    let n = 10;
+    let ctx = Context::new();
+    for i in 0..n {
+        let step = c / n;
+        let start = i * step * 2;
+        let mut ctx = ctx.clone();
+        *ctx.base_offset = start;
+        let t = std::thread::spawn(move || {
+            for _ in 0..step {
+                ctx.one_line(
+                    (0..VAR_COLUMNS)
+                        .map(|i| pair!(vars[i], coeffs[i]))
+                        .collect(),
+                    Some(-result),
+                    (muls_coeffs.to_vec(), Some(next_coeff)),
+                );
+
+                ctx.one_line_with_last(vec![], pair!(next_var, Fr::zero()), None, (vec![], None));
+            }
+        });
+        threads.push(t);
+    }
+
+    for t in threads {
+        t.join().unwrap();
+    }
+    end_timer!(timer);
+
     const K: u32 = 16;
-    let circuit = TestBaseChipCircuit::<Fr> {
-        test_case: TestCase::OneLineMultiThread,
+    let circuit = TestCircuit::<Fr> {
+        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
         _phantom: PhantomData,
     };
     let prover = match MockProver::run(K, &circuit, vec![]) {

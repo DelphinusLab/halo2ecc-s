@@ -1,4 +1,4 @@
-use crate::utils::{bn_to_field, field_to_bn, AssignedValue, Context};
+use crate::{assign::AssignedValue, context::Context, range_info::*, utils::bn_to_field};
 
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
@@ -9,186 +9,30 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 use std::{marker::PhantomData, vec};
 
-#[derive(Copy, Clone)]
-enum RangeClass {
-    WCeilLeading = 1,
-    NFloorLeading = 2,
-    DLeading = 3,
-    Common = 4,
-}
-
-pub const COMMON_RANGE_BITS: usize = 18;
-pub const W_CEIL_LEADING_CHUNKS: usize = 3;
-pub const N_FLOOR_LEADING_CHUNKS: usize = 3;
-pub const D_LEADING_CHUNKS: usize = 4;
-pub const MAX_CHUNKS: usize = 5;
-
 const CLASS_SHIFT_BITS: usize = 128;
 
 #[derive(Clone, Debug)]
-pub struct RangeGateConfig {
+pub struct RangeChipConfig {
     pub range_table_column: TableColumn,
     pub block_first: Column<Fixed>,
     pub range_class: Column<Fixed>,
     pub value: Column<Advice>,
 }
 
-pub struct RangeInfo<W: BaseExt, N: FieldExt> {
-    pub common_range_mask: BigUint,
+pub struct RangeChip<W: BaseExt, N: FieldExt> {
+    pub config: RangeChipConfig,
     pub _phantom: PhantomData<(N, W)>,
 }
 
-pub struct RangeGate<W: BaseExt, N: FieldExt> {
-    pub config: RangeGateConfig,
-    pub info: RangeInfo<W, N>,
-    pub _phantom: PhantomData<(N, W)>,
-}
-
-impl<W: BaseExt, N: FieldExt> RangeGate<W, N> {
-    fn assign(
-        &self,
-        ctx: &mut Context<N>,
-        bn: Option<&BigUint>,
-        common_len: usize,
-        class: Option<RangeClass>,
-    ) -> Result<AssignedValue<N>, Error> {
-        let mut offset = *ctx.range_offset;
-
-        ctx.region.as_mut().assign_fixed(
-            || "block",
-            self.config.block_first,
-            offset,
-            || Ok(N::one()),
-        )?;
-
-        for i in 1..MAX_CHUNKS + 1 {
-            ctx.region.as_mut().assign_fixed(
-                || "block",
-                self.config.block_first,
-                offset + i,
-                || Ok(N::zero()),
-            )?;
-        }
-
-        let res = ctx.region.as_mut().assign_advice(
-            || "value",
-            self.config.value,
-            offset,
-            || Ok(bn_to_field(bn.unwrap())),
-        )?;
-
-        offset += 1;
-
-        for i in 0..common_len {
-            ctx.region.as_mut().assign_fixed(
-                || "block",
-                self.config.range_class,
-                offset,
-                || Ok(N::from(RangeClass::Common as u64)),
-            )?;
-
-            ctx.region.as_mut().assign_advice(
-                || "value",
-                self.config.value,
-                offset,
-                || {
-                    Ok(bn_to_field(
-                        &((bn.unwrap() >> (i * COMMON_RANGE_BITS)) & &self.info.common_range_mask),
-                    ))
-                },
-            )?;
-
-            offset += 1;
-        }
-
-        if class.is_some() {
-            ctx.region.as_mut().assign_fixed(
-                || "block",
-                self.config.range_class,
-                offset,
-                || Ok(N::from(class.unwrap() as u64)),
-            )?;
-
-            ctx.region.as_mut().assign_advice(
-                || "value",
-                self.config.value,
-                offset,
-                || {
-                    Ok(bn_to_field::<N>(
-                        &((bn.unwrap() >> (common_len * COMMON_RANGE_BITS))
-                            & &self.info.common_range_mask),
-                    ))
-                },
-            )?;
-        }
-
-        *ctx.range_offset += MAX_CHUNKS + 1;
-
-        Ok(AssignedValue(res))
-    }
-}
-
-impl<W: BaseExt, N: FieldExt> RangeGate<W, N> {
-    fn assign_common(
-        &self,
-        ctx: &mut Context<N>,
-        bn: Option<&BigUint>,
-    ) -> Result<AssignedValue<N>, Error> {
-        self.assign(ctx, bn, 1, None)
-    }
-
-    fn assign_nonleading_limb(
-        &self,
-        ctx: &mut Context<N>,
-        bn: Option<&BigUint>,
-    ) -> Result<AssignedValue<N>, Error> {
-        self.assign(ctx, bn, MAX_CHUNKS, None)
-    }
-
-    fn assign_w_ceil_leading_limb(
-        &self,
-        ctx: &mut Context<N>,
-        bn: Option<&BigUint>,
-    ) -> Result<AssignedValue<N>, Error> {
-        self.assign(
-            ctx,
-            bn,
-            W_CEIL_LEADING_CHUNKS - 1,
-            Some(RangeClass::WCeilLeading),
-        )
-    }
-
-    fn assign_n_floor_leading_limb(
-        &self,
-        ctx: &mut Context<N>,
-        bn: Option<&BigUint>,
-    ) -> Result<AssignedValue<N>, Error> {
-        self.assign(
-            ctx,
-            bn,
-            N_FLOOR_LEADING_CHUNKS - 1,
-            Some(RangeClass::NFloorLeading),
-        )
-    }
-
-    fn assign_d_leading_limb(
-        &self,
-        ctx: &mut Context<N>,
-        bn: Option<&BigUint>,
-    ) -> Result<AssignedValue<N>, Error> {
-        self.assign(ctx, bn, D_LEADING_CHUNKS - 1, Some(RangeClass::DLeading))
-    }
-}
-
-impl<W: BaseExt, N: FieldExt> RangeGate<W, N> {
-    pub fn new(config: RangeGateConfig) -> Self {
-        RangeGate {
+impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
+    pub fn new(config: RangeChipConfig) -> Self {
+        RangeChip {
             config,
             _phantom: PhantomData,
         }
     }
 
-    pub fn configure(meta: &mut ConstraintSystem<N>) -> RangeGateConfig {
+    pub fn configure(meta: &mut ConstraintSystem<N>) -> RangeChipConfig {
         let block_first = meta.fixed_column();
         let range_class = meta.fixed_column();
         let range_table_column = meta.lookup_table_column();
@@ -224,54 +68,19 @@ impl<W: BaseExt, N: FieldExt> RangeGate<W, N> {
             vec![is_block_first * (acc - meta.query_advice(value, Rotation::cur()))]
         });
 
-        RangeGateConfig {
+        RangeChipConfig {
             range_table_column,
             block_first,
             range_class,
             value,
         }
     }
-}
 
-impl<W: BaseExt, N: FieldExt> RangeGate<W, N> {
     pub fn init_table(
         &self,
         layouter: &mut impl Layouter<N>,
-        integer_modulus: &BigUint,
+        range_info: &RangeInfo<N>,
     ) -> Result<(), Error> {
-        let w_max = field_to_bn(&-W::one());
-        let w_ceil_bits = w_max.bits() as usize;
-        assert!(BigUint::from(1u64) << w_ceil_bits > w_max);
-        assert!(BigUint::from(1u64) << (w_ceil_bits - 1) < w_max);
-        let w_ceil_leading_range_bits = w_ceil_bits % COMMON_RANGE_BITS;
-        // limited by current implementation
-        assert_eq!(
-            w_ceil_bits / COMMON_RANGE_BITS % MAX_CHUNKS,
-            W_CEIL_LEADING_CHUNKS - 1
-        );
-        assert!(w_ceil_leading_range_bits != 0);
-
-        let n_max = field_to_bn(&-N::one());
-        let n_floor_bits = n_max.bits() as usize - 1;
-        assert!(BigUint::from(1u64) << n_floor_bits < n_max);
-        assert!(BigUint::from(1u64) << (n_floor_bits + 1) >= n_max);
-        let n_floor_leading_range_bits = n_floor_bits % COMMON_RANGE_BITS;
-        // limited by current implementation
-        assert_eq!(
-            n_floor_bits / COMMON_RANGE_BITS % MAX_CHUNKS,
-            N_FLOOR_LEADING_CHUNKS - 1
-        );
-        assert!(n_floor_leading_range_bits != 0);
-
-        let d_range_bits = get_d_range_bits_in_mul::<W, N>(integer_modulus);
-        let d_leading_range_bits = d_range_bits % COMMON_RANGE_BITS;
-        // limited by current implementation
-        assert_eq!(
-            d_range_bits / COMMON_RANGE_BITS % MAX_CHUNKS,
-            D_LEADING_CHUNKS - 1
-        );
-        assert!(d_leading_range_bits != 0);
-
         let class_shift = bn_to_field::<N>(&(BigUint::from(1u64) << CLASS_SHIFT_BITS));
         layouter.assign_table(
             || "common range table",
@@ -302,14 +111,81 @@ impl<W: BaseExt, N: FieldExt> RangeGate<W, N> {
                 }
 
                 assign_range!(COMMON_RANGE_BITS, RangeClass::Common);
-                assign_range!(d_leading_range_bits, RangeClass::DLeading);
-                assign_range!(w_ceil_leading_range_bits, RangeClass::WCeilLeading);
-                assign_range!(n_floor_leading_range_bits, RangeClass::NFloorLeading);
+                assign_range!(range_info.d_leading_bits, RangeClass::DLeading);
+                assign_range!(range_info.w_ceil_leading_bits, RangeClass::WCeilLeading);
+                assign_range!(range_info.n_floor_leading_bits, RangeClass::NFloorLeading);
 
                 Ok(())
             },
         )?;
 
         Ok(())
+    }
+}
+
+pub trait RangeChipOps<N: FieldExt> {
+    fn info(&self) -> &RangeInfo<N>;
+    fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N>;
+    fn assign_nonleading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
+    fn assign_w_ceil_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
+    fn assign_n_floor_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
+    fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
+}
+
+fn decompose_bn<N: FieldExt>(bn: &BigUint, n: usize, mask: &BigUint) -> (N, Vec<N>) {
+    let v = bn_to_field::<N>(bn);
+    let mut chunks = vec![];
+
+    for i in 0..n {
+        let val = (bn >> (i * COMMON_RANGE_BITS)) & mask;
+        chunks.push(bn_to_field::<N>(&val));
+    }
+
+    (v, chunks)
+}
+
+impl<N: FieldExt> RangeChipOps<N> for Context<N> {
+    fn info(&self) -> &RangeInfo<N> {
+        self.range_info.as_ref().unwrap()
+    }
+
+    fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let v = decompose_bn(bn, 1, &self.info().common_range_mask);
+        let mut records = self.records.lock().unwrap();
+        let res = records.assign_range_value(*self.range_offset, v, RangeClass::Common);
+        *self.range_offset += MAX_CHUNKS + 1;
+        res
+    }
+
+    fn assign_nonleading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let v = decompose_bn(bn, MAX_CHUNKS, &self.info().common_range_mask);
+        let mut records = self.records.lock().unwrap();
+        let res = records.assign_range_value(*self.range_offset, v, RangeClass::Common);
+        *self.range_offset += MAX_CHUNKS + 1;
+        res
+    }
+
+    fn assign_w_ceil_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let v = decompose_bn(bn, W_CEIL_LEADING_CHUNKS, &self.info().common_range_mask);
+        let mut records = self.records.lock().unwrap();
+        let res = records.assign_range_value(*self.range_offset, v, RangeClass::WCeilLeading);
+        *self.range_offset += MAX_CHUNKS + 1;
+        res
+    }
+
+    fn assign_n_floor_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let v = decompose_bn(bn, N_FLOOR_LEADING_CHUNKS, &self.info().common_range_mask);
+        let mut records = self.records.lock().unwrap();
+        let res = records.assign_range_value(*self.range_offset, v, RangeClass::NFloorLeading);
+        *self.range_offset += MAX_CHUNKS + 1;
+        res
+    }
+
+    fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let v = decompose_bn(bn, D_LEADING_CHUNKS, &self.info().common_range_mask);
+        let mut records = self.records.lock().unwrap();
+        let res = records.assign_range_value(*self.range_offset, v, RangeClass::DLeading);
+        *self.range_offset += MAX_CHUNKS + 1;
+        res
     }
 }

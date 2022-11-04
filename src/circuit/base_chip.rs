@@ -6,7 +6,8 @@ use halo2_proofs::{
 use std::marker::PhantomData;
 
 use crate::{
-    context::{AssignedCondition, AssignedValue, Chip, Context, ValueSchema},
+    assign::{AssignedCondition, AssignedValue, Chip, ValueSchema},
+    context::Context,
     pair,
 };
 
