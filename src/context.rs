@@ -11,36 +11,39 @@ use halo2_proofs::{
     circuit::{AssignedCell, Region},
     plonk::Error,
 };
-use std::collections::HashSet;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use std::{collections::HashSet, marker::PhantomData};
 
 #[derive(Debug, Clone)]
-pub struct Context<N: FieldExt> {
+pub struct Context<W: FieldExt, N: FieldExt> {
     pub records: Arc<Mutex<Records<N>>>,
     pub base_offset: Box<usize>,
     pub range_offset: Box<usize>,
     pub range_info: Option<Arc<RangeInfo<N>>>,
+    _mark: PhantomData<W>,
 }
 
-impl<N: FieldExt> Context<N> {
+impl<W: FieldExt, N: FieldExt> Context<W, N> {
     pub fn new() -> Self {
         Self {
             records: Arc::new(Mutex::new(Records::default())),
             base_offset: Box::new(0),
             range_offset: Box::new(0),
             range_info: None,
+            _mark: PhantomData,
         }
     }
 
-    pub fn new_with_range_info<W: FieldExt>() -> Self {
+    pub fn new_with_range_info() -> Self {
         Self {
             records: Arc::new(Mutex::new(Records::default())),
             base_offset: Box::new(0),
             range_offset: Box::new(0),
             range_info: Some(Arc::new(RangeInfo::<N>::new::<W>())),
+            _mark: PhantomData,
         }
     }
 }

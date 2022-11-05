@@ -313,7 +313,7 @@ pub trait BaseChipOps<N: FieldExt> {
             (vec![one], None),
         );
 
-        (AssignedCondition(cells.1), cells.0[2])
+        (AssignedCondition(cells.1), cells.0[1])
     }
 
     fn is_zero(&mut self, a: &AssignedValue<N>) -> AssignedCondition<N> {
@@ -454,7 +454,7 @@ pub trait BaseChipOps<N: FieldExt> {
     }
 }
 
-impl<N: FieldExt> BaseChipOps<N> for Context<N> {
+impl<W: FieldExt, N: FieldExt> BaseChipOps<N> for Context<W, N> {
     fn var_columns(&mut self) -> usize {
         VAR_COLUMNS
     }

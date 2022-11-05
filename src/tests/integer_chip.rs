@@ -1,21 +1,20 @@
-use crate::circuit::base_chip::{BaseChip, BaseChipConfig};
+use crate::circuit::base_chip::{BaseChip, BaseChipConfig, BaseChipOps};
+use crate::circuit::integer_chip::IntegerChipOps;
+use crate::circuit::range_chip::RangeChip;
 use crate::circuit::range_chip::RangeChipConfig;
-use crate::circuit::range_chip::{RangeChip, RangeChipOps};
 use crate::context::Context;
 use crate::context::Records;
-use crate::range_info::{RangeInfo, COMMON_RANGE_BITS, MAX_CHUNKS};
+use crate::range_info::RangeInfo;
 use crate::tests::random_fq;
 use crate::utils::field_to_bn;
 use ark_std::{end_timer, start_timer};
-use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::arithmetic::{Field, FieldExt};
 use halo2_proofs::pairing::bn256::{Fq, Fr};
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner},
     dev::MockProver,
     plonk::{Circuit, ConstraintSystem, Error},
 };
-use num_bigint::BigUint;
-use num_integer::Integer;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -74,39 +73,94 @@ impl<W: FieldExt, N: FieldExt> Circuit<N> for TestCircuit<W, N> {
 }
 
 #[test]
-fn test_range_chip() {
+fn test_integer_chip() {
+    let mut ctx = Context::<Fq, Fr>::new_with_range_info();
+
+    let a = random_fq();
+    let mut b = random_fq();
+
+    let mut timeout = 3;
+    while b.is_zero().into() && timeout > 0 {
+        b = random_fq();
+        timeout -= 1;
+    }
+    assert!(timeout > 0);
+
+    let c = a + b;
+    let d = a - b;
+    let e = a * b;
+    let f = a * b.invert().unwrap();
+
+    let a = ctx.assign_w(&field_to_bn(&a));
+    let b = ctx.assign_w(&field_to_bn(&b));
+
+    let c1 = ctx.assign_w(&field_to_bn(&c));
+    let c2 = ctx.int_add(&a, &b);
+    ctx.assert_int_equal(&c1, &c2);
+
+    let d1 = ctx.assign_w(&field_to_bn(&d));
+    let d2 = ctx.int_sub(&a, &b);
+    ctx.assert_int_equal(&d1, &d2);
+
+    let e1 = ctx.assign_w(&field_to_bn(&e));
+    let e2 = ctx.int_mul(&a, &b);
+    ctx.assert_int_equal(&e1, &e2);
+
+    let f1 = ctx.assign_w(&field_to_bn(&f));
+    let f2 = ctx.int_div(&a, &b).1;
+    ctx.assert_int_equal(&f1, &f2);
+
+    let zero = ctx.int_sub(&a, &a);
+    let (g1, _) = ctx.int_div(&a, &zero);
+    ctx.assert_true(&g1);
+
+    const K: u32 = 19;
+    let circuit = TestCircuit::<Fq, Fr> {
+        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+        _phantom: PhantomData,
+    };
+    let prover = match MockProver::run(K, &circuit, vec![]) {
+        Ok(prover) => prover,
+        Err(e) => panic!("{:#?}", e),
+    };
+    assert_eq!(prover.verify(), Ok(()));
+}
+
+#[test]
+fn test_integer_chip_mt() {
     let ctx = Context::<Fq, Fr>::new_with_range_info();
 
-    let a = field_to_bn(&random_fq());
-    let b = field_to_bn(&random_fq());
-    let fq_modulus = field_to_bn(&-Fq::one()) + 1u64;
-    let (d, r) = (&a * &b).div_rem(&fq_modulus);
+    let a = random_fq();
+    let b = random_fq();
+    let ab = a * b;
 
     let timer = start_timer!(|| "setup");
-    let c = (1 + MAX_CHUNKS) * 5 * 330;
+    let unit = 156;
+    let c = 10000 / unit * unit;
     let n = 10;
 
     let mut threads = vec![];
 
     for i in 0..n {
         let step = c / n;
-        let start = i * step * 2;
+        let start = i * step;
         let mut ctx = ctx.clone();
         *ctx.range_offset = start;
-        let common = &a & (BigUint::from(1u64) << (MAX_CHUNKS * COMMON_RANGE_BITS) - 1);
-        let a_leading = &a >> (2 * MAX_CHUNKS * COMMON_RANGE_BITS);
-        let b_leading = &b >> (2 * MAX_CHUNKS * COMMON_RANGE_BITS);
-        let d_leading = &d >> (2 * MAX_CHUNKS * COMMON_RANGE_BITS);
-        let r_leading = &r >> (2 * MAX_CHUNKS * COMMON_RANGE_BITS);
+        *ctx.base_offset = start;
+        let a = a.clone();
+        let b = b.clone();
+        let ab = ab.clone();
         let t = std::thread::spawn(move || {
-            for _ in 0..step / (1 + MAX_CHUNKS) / 5 {
-                ctx.assign_nonleading_limb(&common);
-                ctx.assign_w_ceil_leading_limb(&a_leading);
-                ctx.assign_w_ceil_leading_limb(&b_leading);
-                ctx.assign_w_ceil_leading_limb(&r_leading);
-                ctx.assign_d_leading_limb(&d_leading);
+            for _ in 0..step / unit {
+                let start_row = usize::max(*ctx.base_offset, *ctx.range_offset);
+                let a = ctx.assign_w(&field_to_bn(&a));
+                let b = ctx.assign_w(&field_to_bn(&b));
+                let ab0 = ctx.assign_w(&field_to_bn(&ab));
+                let ab1 = ctx.int_mul(&a, &b);
+                ctx.assert_int_equal(&ab0, &ab1);
+                let end_row = usize::max(*ctx.base_offset, *ctx.range_offset);
+                assert_eq!(end_row - start_row, unit);
             }
-            assert!(*ctx.range_offset <= start + step);
         });
         threads.push(t);
     }

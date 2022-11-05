@@ -33,15 +33,21 @@ pub struct RangeInfo<N: FieldExt> {
     pub w_ceil_leading_bits: usize,
     pub n_floor_leading_bits: usize,
 
-    pub w_ceil_modulus: BigUint,
+    pub w_ceil: BigUint,
     pub n_modulus: BigUint,
+    pub neg_w_modulus: BigUint,
     pub w_modulus: BigUint,
     pub common_range_mask: BigUint,
     pub limb_mask: BigUint,
     pub limb_modulus: BigUint,
+    pub integer_modulus: BigUint,
+    pub max_d: BigUint,
 
+    pub w_modulus_limbs_le_bn: [BigUint; LIMBS],
     pub w_modulus_limbs_le: [N; LIMBS],
+    pub neg_w_modulus_limbs_le: [N; LIMBS],
     pub limb_coeffs: [N; LIMBS],
+    pub limb_modulus_n: N,
 
     pub w_native: N,
 
@@ -50,10 +56,55 @@ pub struct RangeInfo<N: FieldExt> {
 
 impl<N: FieldExt> RangeInfo<N> {
     pub fn pre_check(&self) {
-        // for pure_w_check, lcm(limb, native) >= w_ceil
+        // is_pure_w_modulus():
+        // lcm(limb, native) >= w_ceil
         let limb_modulus = &self.limb_modulus;
         let lcm = self.n_modulus.lcm(&limb_modulus);
-        assert!(lcm >= self.w_ceil_modulus);
+        assert!(lcm >= self.w_ceil);
+
+        // reduce():
+        // lcm(limb, native) >= w_ceil * OVERFLOW_LIMIT
+        let limb_modulus = &self.limb_modulus;
+        let lcm = self.n_modulus.lcm(&limb_modulus);
+        assert!(lcm >= &self.w_ceil * OVERFLOW_LIMIT);
+        // to ensure that d can be assigned by assign_common.
+        assert!(COMMON_RANGE_BITS > OVERFLOW_BITS);
+        // to ensure that v can be assigned by assign_nonleading_limb
+        assert!(
+            &(BigUint::from(1u64) << COMMON_RANGE_BITS + 1 + OVERFLOW_LIMIT) < &self.limb_modulus
+        );
+        // to ensure that v * limb_modulus would not overflow
+        assert!(&(&self.limb_modulus * &self.limb_modulus) < &self.n_modulus);
+
+        // mul():
+        // lcm(integer_modulus, native) >= w_ceil * w_ceil * OVERFLOW_LIMIT * OVERFLOW_LIMIT
+        let lcm = self.integer_modulus.lcm(&self.n_modulus);
+        let max_a = &self.w_modulus * OVERFLOW_LIMIT;
+        let max_b = &self.w_modulus * OVERFLOW_LIMIT;
+        let max_l = max_a * max_b;
+        let max_d = &self.max_d;
+        let max_w = &self.w_modulus;
+        let max_rem = &self.w_ceil;
+        let max_r = max_d * max_w + max_rem;
+        assert!(max_l <= lcm);
+        assert!(max_r <= lcm);
+        assert!(max_l <= max_r);
+        // (u, v)
+        let sum_limb_max =
+            LIMBS * (OVERFLOW_LIMIT * OVERFLOW_LIMIT + 1) * &self.limb_modulus * &self.limb_modulus;
+        assert!(sum_limb_max < self.n_modulus);
+        // Ensure we can split v into (common, nonleading)
+        // The last `1` reserve for the borrow and carry.
+        // The real reserved value is (1 + common) / limb_modulus.
+        assert!(1 << COMMON_RANGE_BITS > LIMBS * (OVERFLOW_LIMIT * OVERFLOW_LIMIT + 1 + 1));
+        let common_modulus = BigUint::from(1u64) << COMMON_RANGE_BITS;
+        assert!(&common_modulus + 1u64 < self.limb_modulus);
+
+        // Ensure nonoverflow for one limb sum check.
+        assert!(&self.limb_modulus * &self.limb_modulus * common_modulus < self.n_modulus);
+
+        // algorithm limitation
+        assert!(LIMBS >= 3);
     }
 
     pub fn d_bits<W: FieldExt>() -> usize {
@@ -106,16 +157,35 @@ impl<N: FieldExt> RangeInfo<N> {
         );
         assert!(d_leading_bits != 0);
 
+        let max_d = BigUint::from(1u64) << d_range_bits;
         let limb_mask = (BigUint::from(1u64) << LIMB_BITS) - 1u64;
         let n_modulus = &n_max + 1u64;
         let w_modulus = &w_max + 1u64;
         let w_native = &w_modulus % &n_modulus;
-        let w_modulus_limbs_le = (0..LIMBS)
+        let integer_modulus = BigUint::from(1u64) << (LIMBS * LIMB_BITS);
+        let neg_w_modulus = &integer_modulus - &w_modulus;
+
+        let w_modulus_limbs_le_bn: [BigUint; LIMBS] = (0..LIMBS)
             .into_iter()
-            .map(|i| bn_to_field(&((&w_modulus >> (i * LIMB_BITS)) & &limb_mask)))
+            .map(|i| ((&w_modulus >> (i * LIMB_BITS)) & &limb_mask))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
+        let neg_w_modulus_limbs_le: [N; LIMBS] = (0..LIMBS)
+            .into_iter()
+            .map(|i| (bn_to_field::<N>(&((&neg_w_modulus >> (i * LIMB_BITS)) & &limb_mask))))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let w_modulus_limbs_le = w_modulus_limbs_le_bn
+            .iter()
+            .map(|x| bn_to_field(x))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let limb_modulus = BigUint::from(1u64) << LIMB_BITS;
+        let limb_modulus_n = bn_to_field(&limb_modulus);
 
         let res = Self {
             w_ceil_bits,
@@ -123,12 +193,15 @@ impl<N: FieldExt> RangeInfo<N> {
             w_ceil_leading_bits,
             n_floor_leading_bits,
 
-            w_ceil_modulus: BigUint::from(1u64) << w_ceil_bits,
+            max_d,
+            w_ceil: BigUint::from(1u64) << w_ceil_bits,
             n_modulus,
             w_modulus,
+            neg_w_modulus,
             common_range_mask: BigUint::from((1u64 << COMMON_RANGE_BITS) - 1),
             limb_mask,
-            limb_modulus: (BigUint::from(1u64) << LIMB_BITS),
+            limb_modulus,
+            integer_modulus,
             limb_coeffs: (0..LIMBS)
                 .into_iter()
                 .map(|i| bn_to_field(&(BigUint::from(1u64) << (i * LIMB_BITS))))
@@ -136,7 +209,11 @@ impl<N: FieldExt> RangeInfo<N> {
                 .try_into()
                 .unwrap(),
 
+            limb_modulus_n,
+            neg_w_modulus_limbs_le,
             w_modulus_limbs_le,
+            w_modulus_limbs_le_bn,
+
             w_native: bn_to_field::<N>(&w_native),
 
             _phantom: PhantomData,
@@ -146,10 +223,19 @@ impl<N: FieldExt> RangeInfo<N> {
         res
     }
 
-    pub fn w_to_limb_n_le(&self, w: &BigUint) -> [N; LIMBS] {
+    pub fn bn_to_limb_le_n(&self, w: &BigUint) -> [N; LIMBS] {
         (0..LIMBS)
             .into_iter()
             .map(|i| bn_to_field(&((w >> (i * LIMB_BITS)) & &self.limb_mask)))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn bn_to_limb_le(&self, w: &BigUint) -> [BigUint; LIMBS] {
+        (0..LIMBS)
+            .into_iter()
+            .map(|i| ((w >> (i * LIMB_BITS)) & &self.limb_mask))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap()
