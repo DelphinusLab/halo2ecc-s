@@ -11,8 +11,8 @@ use crate::{
     pair,
 };
 
-pub const VAR_COLUMNS: usize = 5;
-pub const MUL_COLUMNS: usize = 2;
+pub const VAR_COLUMNS: usize = 4;
+pub const MUL_COLUMNS: usize = 1;
 pub const FIXED_COLUMNS: usize = VAR_COLUMNS + MUL_COLUMNS + 2;
 
 #[derive(Clone, Debug)]
@@ -141,13 +141,17 @@ pub trait BaseChipOps<N: FieldExt> {
         } else {
             let (mut curr, mut tail) = elems.split_at(columns - 1);
             let mut acc = self.sum_with_constant_in_one_line(Vec::from(curr), constant);
-            while tail.len() > 0 {
-                (curr, tail) = elems.split_at(columns - 2);
+
+            while tail.len() + 2 > columns {
+                (curr, tail) = tail.split_at(columns - 2);
                 acc = self.sum_with_constant_in_one_line(
                     vec![curr, &[(&acc, N::one())]].concat(),
                     constant,
                 );
             }
+
+            acc = self
+                .sum_with_constant_in_one_line(vec![tail, &[(&acc, N::one())]].concat(), constant);
             acc
         }
     }

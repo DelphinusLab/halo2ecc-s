@@ -100,6 +100,8 @@ impl<W: FieldExt, N: FieldExt> Context<W, N> {
             limbs.push(l);
         }
 
+        // 4 LIMBS can reduce loop by merging 2 limbs check.
+
         // check sum limb[0]
         let u = self.sum_with_constant(
             vec![(&limbs[0], one), (&rem.limbs_le[0], -one)],
@@ -209,6 +211,7 @@ impl<W: FieldExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
 
         let schemas = limbs.iter().zip(info.limb_coeffs);
         let native = self.sum_with_constant(schemas.collect(), None);
+
         AssignedInteger::new(limbs.try_into().unwrap(), native, 1)
     }
 

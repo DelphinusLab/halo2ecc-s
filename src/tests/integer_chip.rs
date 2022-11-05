@@ -73,7 +73,7 @@ impl<W: FieldExt, N: FieldExt> Circuit<N> for TestCircuit<W, N> {
 }
 
 #[test]
-fn test_integer_chip() {
+fn test_integer_chip_st() {
     let mut ctx = Context::<Fq, Fr>::new_with_range_info();
 
     let a = random_fq();
@@ -135,8 +135,8 @@ fn test_integer_chip_mt() {
     let ab = a * b;
 
     let timer = start_timer!(|| "setup");
-    let unit = 156;
-    let c = 10000 / unit * unit;
+    let unit = 170;
+    let c = 17000 / unit * unit;
     let n = 10;
 
     let mut threads = vec![];
@@ -159,7 +159,7 @@ fn test_integer_chip_mt() {
                 let ab1 = ctx.int_mul(&a, &b);
                 ctx.assert_int_equal(&ab0, &ab1);
                 let end_row = usize::max(*ctx.base_offset, *ctx.range_offset);
-                assert_eq!(end_row - start_row, unit);
+                assert!(end_row - start_row <= unit);
             }
         });
         threads.push(t);

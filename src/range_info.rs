@@ -5,12 +5,24 @@ use std::marker::PhantomData;
 
 use crate::utils::{bn_to_field, field_to_bn};
 
+// 3 LIMBS
 pub const COMMON_RANGE_BITS: usize = 18;
 pub const W_CEIL_LEADING_CHUNKS: usize = 5;
 pub const N_FLOOR_LEADING_CHUNKS: usize = 5;
 pub const D_LEADING_CHUNKS: usize = 5;
 pub const MAX_CHUNKS: usize = 5;
 pub const LIMBS: usize = 3;
+
+// 4 LIMBS
+/*
+pub const COMMON_RANGE_BITS: usize = 17;
+pub const W_CEIL_LEADING_CHUNKS: usize = 3;
+pub const N_FLOOR_LEADING_CHUNKS: usize = 3;
+pub const D_LEADING_CHUNKS: usize = 4;
+pub const MAX_CHUNKS: usize = 4;
+pub const LIMBS: usize = 4;
+*/
+
 pub const LIMB_BITS: usize = MAX_CHUNKS * COMMON_RANGE_BITS;
 
 pub const OVERFLOW_BITS: usize = 5;
