@@ -8,6 +8,7 @@ use rand_xorshift::XorShiftRng;
 pub mod base_chip;
 pub mod range_chip;
 pub mod integer_chip;
+pub mod native_ecc_chip;
 
 fn random<N: FieldExt>() -> N {
     let seed = chrono::offset::Utc::now()

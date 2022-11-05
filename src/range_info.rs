@@ -27,7 +27,7 @@ pub const LIMB_BITS: usize = MAX_CHUNKS * COMMON_RANGE_BITS;
 
 pub const OVERFLOW_BITS: usize = 5;
 pub const OVERFLOW_LIMIT: usize = 1 << OVERFLOW_BITS;
-pub const OVERFLOW_THRESHOLD: usize = 1 << (OVERFLOW_BITS - 1);
+pub const OVERFLOW_THRESHOLD: usize = 1 << (OVERFLOW_BITS - 2);
 
 #[derive(Copy, Clone)]
 pub enum RangeClass {
@@ -254,7 +254,7 @@ impl<N: FieldExt> RangeInfo<N> {
     }
 
     pub fn find_w_modulus_ceil(&self, times: usize) -> [N; LIMBS] {
-        let max = (times + 1) * (BigUint::from(1u64) << self.w_ceil_bits);
+        let max = &self.w_ceil * (times + 1);
         let (n, rem) = max.div_rem(&self.w_modulus);
         let n = if rem.gt(&BigUint::from(0u64)) {
             n + 1u64
@@ -262,11 +262,11 @@ impl<N: FieldExt> RangeInfo<N> {
             n
         };
 
-        let mut upper = n * &self.w_modulus;
+        let mut upper = &self.w_modulus * n;
 
         let mut limbs = vec![];
         for _ in 0..LIMBS - 1 {
-            let rem = (&upper & &self.limb_mask) + times * &self.limb_modulus;
+            let rem = (&upper & &self.limb_mask) + &self.limb_modulus * times;
             upper = (upper - &rem) >> LIMB_BITS;
             limbs.push(bn_to_field::<N>(&rem));
         }

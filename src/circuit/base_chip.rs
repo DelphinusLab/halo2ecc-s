@@ -234,7 +234,7 @@ pub trait BaseChipOps<N: FieldExt> {
         let one = N::one();
         let zero = N::zero();
 
-        let d = a.val * b.val + c.val * c_coeff;
+        let d = a.val * b.val * ab_coeff + c.val * c_coeff;
 
         let cells = self.one_line_with_last(
             vec![pair!(a, zero), pair!(b, zero), pair!(c, c_coeff)],
@@ -462,10 +462,12 @@ pub trait BaseChipOps<N: FieldExt> {
     }
 
     fn assert_true(&mut self, a: &AssignedCondition<N>) {
+        assert!(a.0.val == N::one());
         self.assert_constant(&a.0, N::one())
     }
 
     fn assert_false(&mut self, a: &AssignedCondition<N>) {
+        assert!(a.0.val == N::zero());
         self.assert_constant(&a.0, N::zero())
     }
 }

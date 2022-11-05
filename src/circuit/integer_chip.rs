@@ -447,9 +447,9 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
     }
 
     fn is_int_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N> {
-        self.reduce(a);
-        let is_zero = self.is_pure_zero(a);
-        let is_w_modulus = self.is_pure_w_modulus(a);
+        let a = self.reduce(a);
+        let is_zero = self.is_pure_zero(&a);
+        let is_w_modulus = self.is_pure_w_modulus(&a);
 
         self.or(&is_zero, &is_w_modulus)
     }

@@ -7,7 +7,7 @@ use crate::{
     range_info::{RangeClass, RangeInfo, MAX_CHUNKS},
 };
 use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
+    arithmetic::{BaseExt, CurveAffine, FieldExt},
     circuit::{AssignedCell, Region},
     plonk::Error,
 };
@@ -25,6 +25,8 @@ pub struct Context<W: BaseExt, N: FieldExt> {
     pub range_info: Option<Arc<RangeInfo<N>>>,
     _mark: PhantomData<W>,
 }
+
+pub type EccContext<C> = Context<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>;
 
 impl<W: FieldExt, N: FieldExt> Context<W, N> {
     pub fn new() -> Self {
@@ -48,7 +50,7 @@ impl<W: FieldExt, N: FieldExt> Context<W, N> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Records<N: FieldExt> {
     pub base_adv_record: Vec<[Option<N>; VAR_COLUMNS]>,
     pub base_fix_record: Vec<[Option<N>; FIXED_COLUMNS]>,
