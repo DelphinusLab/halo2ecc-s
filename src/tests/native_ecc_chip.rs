@@ -181,7 +181,7 @@ fn bench_native_ecc_chip() {
         &params,
         &pk,
         &[circuit.clone()],
-        &[&[&[]]],
+        &[&[]],
         OsRng,
         &mut transcript,
     )
@@ -201,7 +201,7 @@ fn bench_native_ecc_chip() {
         &params,
         &vk,
         strategy,
-        &[&[&[]]],
+        &[&[]],
         &mut transcript,
     )
     .unwrap();
