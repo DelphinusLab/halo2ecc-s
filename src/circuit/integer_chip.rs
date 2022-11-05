@@ -1,4 +1,4 @@
-use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::arithmetic::{BaseExt, FieldExt};
 use num_bigint::BigUint;
 use num_integer::Integer;
 
@@ -11,7 +11,7 @@ use crate::{
     utils::{bn_to_field, field_to_bn},
 };
 
-pub trait IntegerChipOps<W: FieldExt, N: FieldExt> {
+pub trait IntegerChipOps<W: BaseExt, N: FieldExt> {
     fn base_chip(&self) -> &dyn BaseChipOps<N>;
     fn range_chip(&self) -> &dyn RangeChipOps<N>;
     fn assign_w(&mut self, w: &BigUint) -> AssignedInteger<W, N>;
@@ -28,7 +28,7 @@ pub trait IntegerChipOps<W: FieldExt, N: FieldExt> {
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
     ) -> AssignedInteger<W, N>;
-    fn neg(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N>;
+    fn int_neg(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N>;
     fn int_mul(
         &mut self,
         a: &AssignedInteger<W, N>,
@@ -42,7 +42,7 @@ pub trait IntegerChipOps<W: FieldExt, N: FieldExt> {
     fn is_pure_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
     fn is_pure_w_modulus(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
     fn is_int_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
-    fn is_equal(
+    fn is_int_equal(
         &mut self,
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
@@ -52,8 +52,12 @@ pub trait IntegerChipOps<W: FieldExt, N: FieldExt> {
     }
     fn assign_int_constant(&mut self, w: W) -> AssignedInteger<W, N>;
     fn assert_int_equal(&mut self, a: &AssignedInteger<W, N>, b: &AssignedInteger<W, N>);
-    fn square(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N>;
-    fn mul_small_constant(&mut self, a: &AssignedInteger<W, N>, b: usize) -> AssignedInteger<W, N>;
+    fn int_square(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N>;
+    fn int_mul_small_constant(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: usize,
+    ) -> AssignedInteger<W, N>;
     fn bisec_int(
         &mut self,
         cond: &AssignedCondition<N>,
@@ -64,7 +68,7 @@ pub trait IntegerChipOps<W: FieldExt, N: FieldExt> {
     fn get_w(&mut self, a: &AssignedInteger<W, N>) -> W;
 }
 
-impl<W: FieldExt, N: FieldExt> Context<W, N> {
+impl<W: BaseExt, N: FieldExt> Context<W, N> {
     fn add_constraints_for_mul_equation_on_limbs(
         &mut self,
         a: &AssignedInteger<W, N>,
@@ -189,7 +193,7 @@ impl<W: FieldExt, N: FieldExt> Context<W, N> {
     }
 }
 
-impl<W: FieldExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
+impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
     fn base_chip(&self) -> &dyn BaseChipOps<N> {
         self
     }
@@ -338,7 +342,7 @@ impl<W: FieldExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
         self.conditionally_reduce(res)
     }
 
-    fn neg(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
+    fn int_neg(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
         let info = self.info();
         let upper_limbs = self.info().find_w_modulus_ceil(a.times);
 
@@ -477,11 +481,15 @@ impl<W: FieldExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
         self.assert_constant(&diff.limbs_le[0], zero);
     }
 
-    fn square(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
+    fn int_square(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
         self.int_mul(a, a)
     }
 
-    fn mul_small_constant(&mut self, a: &AssignedInteger<W, N>, b: usize) -> AssignedInteger<W, N> {
+    fn int_mul_small_constant(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: usize,
+    ) -> AssignedInteger<W, N> {
         assert!(b < OVERFLOW_THRESHOLD);
 
         let info = self.info();

@@ -7,7 +7,7 @@ use crate::{
     range_info::{RangeClass, RangeInfo, MAX_CHUNKS},
 };
 use halo2_proofs::{
-    arithmetic::FieldExt,
+    arithmetic::{BaseExt, FieldExt},
     circuit::{AssignedCell, Region},
     plonk::Error,
 };
@@ -18,7 +18,7 @@ use std::{
 use std::{collections::HashSet, marker::PhantomData};
 
 #[derive(Debug, Clone)]
-pub struct Context<W: FieldExt, N: FieldExt> {
+pub struct Context<W: BaseExt, N: FieldExt> {
     pub records: Arc<Mutex<Records<N>>>,
     pub base_offset: Box<usize>,
     pub range_offset: Box<usize>,

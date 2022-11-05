@@ -1,5 +1,5 @@
 use halo2_proofs::{
-    arithmetic::FieldExt,
+    arithmetic::{BaseExt, FieldExt},
     plonk::{Advice, Column, ConstraintSystem, Fixed},
     poly::Rotation,
 };
@@ -354,6 +354,18 @@ pub trait BaseChipOps<N: FieldExt> {
         cells[0]
     }
 
+    fn assign_bit(&mut self, a: N) -> AssignedCondition<N> {
+        let zero = N::zero();
+        let one = N::one();
+
+        let cells = self.one_line(
+            vec![pair!(a, one), pair!(a, zero)],
+            None,
+            (vec![-one], None),
+        );
+        AssignedCondition(cells[0])
+    }
+
     fn assert_equal(&mut self, a: &AssignedValue<N>, b: &AssignedValue<N>) {
         let one = N::one();
 
@@ -458,7 +470,7 @@ pub trait BaseChipOps<N: FieldExt> {
     }
 }
 
-impl<W: FieldExt, N: FieldExt> BaseChipOps<N> for Context<W, N> {
+impl<W: BaseExt, N: FieldExt> BaseChipOps<N> for Context<W, N> {
     fn var_columns(&mut self) -> usize {
         VAR_COLUMNS
     }

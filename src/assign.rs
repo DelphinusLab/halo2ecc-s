@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
 
 use crate::range_info::LIMBS;
 
@@ -30,14 +30,42 @@ pub struct AssignedValue<N: FieldExt> {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct AssignedInteger<W: FieldExt, N: FieldExt> {
+pub struct AssignedInteger<W: BaseExt, N: FieldExt> {
     pub limbs_le: [AssignedValue<N>; LIMBS],
     pub native: AssignedValue<N>,
     pub times: usize,
     _mark: PhantomData<W>,
 }
 
-impl<W: FieldExt, N: FieldExt> AssignedInteger<W, N> {
+#[derive(Clone, Debug)]
+pub struct AssignedCurvature<C: CurveAffine, N: FieldExt>(
+    pub AssignedInteger<C::Base, N>,
+    pub AssignedCondition<N>,
+);
+
+#[derive(Clone, Debug)]
+pub struct AssignedPoint<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedInteger<C::Base, N>,
+    pub y: AssignedInteger<C::Base, N>,
+    pub z: AssignedCondition<N>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AssignedPointWithCurvature<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedInteger<C::Base, N>,
+    pub y: AssignedInteger<C::Base, N>,
+    pub z: AssignedCondition<N>,
+
+    pub curvature: AssignedCurvature<C, N>,
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedPointWithCurvature<C, N> {
+    pub fn to_point(&self) -> AssignedPoint<C, N> {
+        AssignedPoint::new(self.x, self.y, self.z)
+    }
+}
+
+impl<W: BaseExt, N: FieldExt> AssignedInteger<W, N> {
     pub fn new(
         limbs_le: [AssignedValue<N>; LIMBS],
         native: AssignedValue<N>,
@@ -61,6 +89,27 @@ impl<'a, N: FieldExt> AssignedValue<N> {
             cell: Cell::new(region, col, row),
             val,
         }
+    }
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedPoint<C, N> {
+    pub fn new(
+        x: AssignedInteger<C::Base, N>,
+        y: AssignedInteger<C::Base, N>,
+        z: AssignedCondition<N>,
+    ) -> Self {
+        Self { x, y, z }
+    }
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedPointWithCurvature<C, N> {
+    pub fn new(
+        x: AssignedInteger<C::Base, N>,
+        y: AssignedInteger<C::Base, N>,
+        z: AssignedCondition<N>,
+        curvature: AssignedCurvature<C, N>,
+    ) -> Self {
+        Self { x, y, z, curvature }
     }
 }
 

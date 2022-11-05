@@ -144,7 +144,7 @@ fn decompose_bn<N: FieldExt>(bn: &BigUint, n: usize, mask: &BigUint) -> (N, Vec<
     (v, chunks)
 }
 
-impl<W: FieldExt, N: FieldExt> RangeChipOps<N> for Context<W, N> {
+impl<W: BaseExt, N: FieldExt> RangeChipOps<N> for Context<W, N> {
     fn info(&self) -> Arc<RangeInfo<N>> {
         self.range_info.clone().unwrap()
     }
