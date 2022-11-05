@@ -6,8 +6,8 @@ use crate::range_info::LIMBS;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Chip {
-    BaseChip,
-    RangeChip,
+    BaseChip = 0,
+    RangeChip = 1,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

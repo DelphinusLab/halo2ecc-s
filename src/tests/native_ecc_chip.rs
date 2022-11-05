@@ -85,7 +85,7 @@ fn test_native_ecc_chip() {
     let mut scalars = vec![];
     let mut acc = G1::identity();
 
-    for _ in 0..96 {
+    for _ in 0..16 {
         let a = random_fr();
         let b = random_fr();
         let p = G1::generator() * a;
@@ -112,7 +112,7 @@ fn test_native_ecc_chip() {
 
     println!("offset {} {}", ctx.range_offset, ctx.base_offset);
 
-    const K: u32 = 22;
+    const K: u32 = 20;
     let circuit = TestCircuit::<Fq, Fr> {
         records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
         _phantom: PhantomData,

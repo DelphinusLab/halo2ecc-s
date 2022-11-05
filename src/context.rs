@@ -11,11 +11,8 @@ use halo2_proofs::{
     circuit::{AssignedCell, Region},
     plonk::Error,
 };
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use std::{collections::HashSet, marker::PhantomData};
+use std::marker::PhantomData;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct Context<W: BaseExt, N: FieldExt> {
@@ -52,16 +49,15 @@ impl<W: FieldExt, N: FieldExt> Context<W, N> {
 
 #[derive(Debug, Default, Clone)]
 pub struct Records<N: FieldExt> {
-    pub base_adv_record: Vec<[Option<N>; VAR_COLUMNS]>,
+    pub base_adv_record: Vec<[(Option<N>, bool); VAR_COLUMNS]>,
     pub base_fix_record: Vec<[Option<N>; FIXED_COLUMNS]>,
     pub base_height: usize,
 
-    pub range_adv_record: Vec<Option<N>>,
+    pub range_adv_record: Vec<(Option<N>, bool)>,
     pub range_fix_record: Vec<[Option<N>; 2]>,
     pub range_height: usize,
 
     pub permutations: Vec<(Cell, Cell)>,
-    pub permutations_cells: HashSet<Cell>,
 }
 
 impl<N: FieldExt> Records<N> {
@@ -69,8 +65,10 @@ impl<N: FieldExt> Records<N> {
         &self,
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
-    ) -> Result<HashMap<Cell, AssignedCell<N, N>>, Error> {
-        let mut cells = HashMap::<Cell, AssignedCell<N, N>>::new();
+    ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
+        let mut cells = vec![];
+
+        cells.resize(VAR_COLUMNS, vec![None; self.base_height]);
 
         for (row, advs) in self.base_adv_record.iter().enumerate() {
             if row >= self.base_height {
@@ -78,16 +76,15 @@ impl<N: FieldExt> Records<N> {
             }
 
             for (col, adv) in advs.iter().enumerate() {
-                if adv.is_some() {
+                if adv.0.is_some() {
                     let cell = region.assign_advice(
                         || "base",
                         base_chip.config.base[col],
                         row,
-                        || Ok(adv.unwrap()),
+                        || Ok(adv.0.unwrap()),
                     )?;
-                    let idx = Cell::new(Chip::BaseChip, col, row);
-                    if self.permutations_cells.contains(&idx) {
-                        cells.insert(idx, cell);
+                    if adv.1 {
+                        cells[col][row] = Some(cell);
                     }
                 }
             }
@@ -122,8 +119,9 @@ impl<N: FieldExt> Records<N> {
         &self,
         region: &mut Region<'_, N>,
         range_chip: &RangeChip<W, N>,
-        mut cells: HashMap<Cell, AssignedCell<N, N>>,
-    ) -> Result<HashMap<Cell, AssignedCell<N, N>>, Error> {
+    ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
+        let mut cells = vec![vec![None; self.range_height]];
+
         for (row, fix) in self.range_fix_record.iter().enumerate() {
             if row >= self.range_height {
                 break;
@@ -151,16 +149,15 @@ impl<N: FieldExt> Records<N> {
             if row >= self.range_height {
                 break;
             }
-            if adv.is_some() {
+            if adv.0.is_some() {
                 let cell = region.assign_advice(
                     || "range var",
                     range_chip.config.value,
                     row,
-                    || Ok(adv.unwrap()),
+                    || Ok(adv.0.unwrap()),
                 )?;
-                let idx = Cell::new(Chip::RangeChip, 0, row);
-                if self.permutations_cells.contains(&idx) {
-                    cells.insert(idx, cell);
+                if adv.1 {
+                    cells[0][row] = Some(cell);
                 }
             }
         }
@@ -171,24 +168,32 @@ impl<N: FieldExt> Records<N> {
     pub fn _assign_permutation(
         &self,
         region: &mut Region<'_, N>,
-        cells: HashMap<Cell, AssignedCell<N, N>>,
-    ) -> Result<HashMap<Cell, AssignedCell<N, N>>, Error> {
+        cells: &Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>,
+    ) -> Result<(), Error> {
         for (left, right) in self.permutations.iter() {
-            let left = cells.get(&left).unwrap().cell();
-            let right = cells.get(&right).unwrap().cell();
+            let left = cells[left.region as usize][left.col][left.row]
+                .as_ref()
+                .unwrap()
+                .cell();
+            let right = cells[right.region as usize][right.col][right.row]
+                .as_ref()
+                .unwrap()
+                .cell();
             region.constrain_equal(left, right)?;
         }
 
-        Ok(cells)
+        Ok(())
     }
 
     pub fn assign_all_in_base(
         &self,
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
-    ) -> Result<HashMap<Cell, AssignedCell<N, N>>, Error> {
+    ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
         let cells = self._assign_to_base_chip(region, base_chip)?;
-        self._assign_permutation(region, cells)
+        let cells = vec![cells];
+        self._assign_permutation(region, &cells)?;
+        Ok(cells)
     }
 
     pub fn assign_all<W: FieldExt>(
@@ -196,10 +201,12 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<W, N>,
-    ) -> Result<HashMap<Cell, AssignedCell<N, N>>, Error> {
-        let cells = self._assign_to_base_chip(region, base_chip)?;
-        let cells = self._assign_to_range_chip(region, range_chip, cells)?;
-        self._assign_permutation(region, cells)
+    ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
+        let base_cells = self._assign_to_base_chip(region, base_chip)?;
+        let range_cells = self._assign_to_range_chip(region, range_chip)?;
+        let cells = vec![base_cells, range_cells];
+        self._assign_permutation(region, &cells)?;
+        Ok(cells)
     }
 
     pub fn one_line(
@@ -215,7 +222,8 @@ impl<N: FieldExt> Records<N> {
 
         if offset >= self.base_adv_record.len() {
             let to_len = (offset + EXTEND_SIZE) & !(EXTEND_SIZE - 1);
-            self.base_adv_record.resize(to_len, [None; VAR_COLUMNS]);
+            self.base_adv_record
+                .resize(to_len, [(None, false); VAR_COLUMNS]);
             self.base_fix_record.resize(to_len, [None; FIXED_COLUMNS]);
         }
 
@@ -227,14 +235,19 @@ impl<N: FieldExt> Records<N> {
             match base.cell() {
                 Some(cell) => {
                     let idx = Cell::new(Chip::BaseChip, i, offset);
-                    self.permutations_cells.insert(idx);
-                    self.permutations_cells.insert(cell);
+
+                    self.base_adv_record[offset][i].1 = true;
+                    match cell.region {
+                        Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
+                        Chip::RangeChip => self.range_adv_record[cell.row].1 = true,
+                    }
+
                     self.permutations.push((cell, idx));
                 }
                 _ => {}
             }
             self.base_fix_record[offset][i] = Some(coeff);
-            self.base_adv_record[offset][i] = Some(base.value());
+            self.base_adv_record[offset][i].0 = Some(base.value());
         }
 
         let (mul_coeffs, next) = mul_next_coeffs;
@@ -269,14 +282,17 @@ impl<N: FieldExt> Records<N> {
         match base.cell() {
             Some(cell) => {
                 let idx = Cell::new(Chip::BaseChip, i, offset);
-                self.permutations_cells.insert(idx);
-                self.permutations_cells.insert(cell);
+                self.base_adv_record[offset][i].1 = true;
+                match cell.region {
+                    Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
+                    Chip::RangeChip => self.range_adv_record[cell.row].1 = true,
+                }
                 self.permutations.push((cell, idx));
             }
             _ => {}
         }
         self.base_fix_record[offset][i] = Some(coeff);
-        self.base_adv_record[offset][i] = Some(base.value());
+        self.base_adv_record[offset][i].0 = Some(base.value());
     }
 
     pub fn assign_range_value(
@@ -291,7 +307,7 @@ impl<N: FieldExt> Records<N> {
 
         if end_offset >= self.range_adv_record.len() {
             let to_len = (end_offset + EXTEND_SIZE) & !(EXTEND_SIZE - 1);
-            self.range_adv_record.resize(to_len, None);
+            self.range_adv_record.resize(to_len, (None, false));
             self.range_fix_record.resize(to_len, [None; 2]);
         }
 
@@ -300,7 +316,7 @@ impl<N: FieldExt> Records<N> {
         }
 
         self.range_fix_record[offset][0] = Some(N::one());
-        self.range_adv_record[offset] = Some(v);
+        self.range_adv_record[offset].0 = Some(v);
 
         // a row placeholder
         self.range_fix_record[offset + MAX_CHUNKS][0] = Some(N::zero());
@@ -312,7 +328,7 @@ impl<N: FieldExt> Records<N> {
             Some(N::from(leading_class as u64));
 
         for i in 0..chunks.len() {
-            self.range_adv_record[offset + 1 + i] = Some(chunks[i]);
+            self.range_adv_record[offset + 1 + i].0 = Some(chunks[i]);
         }
 
         AssignedValue::new(Chip::RangeChip, 0, offset, v)
