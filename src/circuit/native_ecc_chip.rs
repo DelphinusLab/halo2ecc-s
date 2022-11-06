@@ -89,10 +89,7 @@ pub trait EccChipOps<C: CurveAffine> {
         let neg_b = self.ecc_neg(b);
         self.ecc_add(a, &neg_b)
     }
-    fn ecc_reduce(
-        &mut self,
-        a: &mut AssignedPoint<C, C::ScalarExt>,
-    ) -> AssignedPoint<C, C::ScalarExt>;
+    fn ecc_reduce(&mut self, a: &AssignedPoint<C, C::ScalarExt>) -> AssignedPoint<C, C::ScalarExt>;
     fn lambda_to_point(
         &mut self,
         lambda: &AssignedCurvature<C, C::ScalarExt>,
@@ -292,10 +289,7 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
         AssignedPoint::new(x, y, z)
     }
 
-    fn ecc_reduce(
-        &mut self,
-        a: &mut AssignedPoint<C, C::ScalarExt>,
-    ) -> AssignedPoint<C, C::ScalarExt> {
+    fn ecc_reduce(&mut self, a: &AssignedPoint<C, C::ScalarExt>) -> AssignedPoint<C, C::ScalarExt> {
         let x = self.reduce(&a.x);
         let y = self.reduce(&a.y);
         let z = a.z;

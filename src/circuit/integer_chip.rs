@@ -65,7 +65,7 @@ pub trait IntegerChipOps<W: BaseExt, N: FieldExt> {
         b: &AssignedInteger<W, N>,
     ) -> AssignedInteger<W, N>;
     fn get_last_bit(&mut self, a: &AssignedInteger<W, N>) -> AssignedValue<N>;
-    fn get_w(&mut self, a: &AssignedInteger<W, N>) -> W;
+    fn get_w(&self, a: &AssignedInteger<W, N>) -> W;
 }
 
 impl<W: BaseExt, N: FieldExt> Context<W, N> {
@@ -183,7 +183,7 @@ impl<W: BaseExt, N: FieldExt> Context<W, N> {
         );
     }
 
-    fn get_w_bn(&mut self, a: &AssignedInteger<W, N>) -> BigUint {
+    fn get_w_bn(&self, a: &AssignedInteger<W, N>) -> BigUint {
         let mut res = BigUint::from(0u64);
         for i in 0..LIMBS {
             res = res << LIMB_BITS;
@@ -563,7 +563,7 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for Context<W, N> {
         bit
     }
 
-    fn get_w(&mut self, a: &AssignedInteger<W, N>) -> W {
+    fn get_w(&self, a: &AssignedInteger<W, N>) -> W {
         bn_to_field(&self.get_w_bn(a))
     }
 }

@@ -1,3 +1,4 @@
+use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigUint;
 use num_integer::Integer;
@@ -119,7 +120,7 @@ impl<N: FieldExt> RangeInfo<N> {
         assert!(LIMBS >= 3);
     }
 
-    pub fn d_bits<W: FieldExt>() -> usize {
+    pub fn d_bits<W: BaseExt>() -> usize {
         // a * b = w * d + rem
 
         // -- a <= w_ceil_bits + overflow_bits /\ b <= w_ceil_bits + overflow_bits
@@ -135,7 +136,7 @@ impl<N: FieldExt> RangeInfo<N> {
         d_bits
     }
 
-    pub fn new<W: FieldExt>() -> Self {
+    pub fn new<W: BaseExt>() -> Self {
         let w_max = field_to_bn(&-W::one());
         let w_ceil_bits = w_max.bits() as usize;
         assert!(BigUint::from(1u64) << w_ceil_bits > w_max);

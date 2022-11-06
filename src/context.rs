@@ -11,6 +11,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Region},
     plonk::Error,
 };
+use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
@@ -23,9 +24,19 @@ pub struct Context<W: BaseExt, N: FieldExt> {
     _mark: PhantomData<W>,
 }
 
+impl<W: BaseExt, N: FieldExt> Display for Context<W, N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(range_offset: {}, base_offset: {})",
+            self.range_offset, self.base_offset
+        )
+    }
+}
+
 pub type EccContext<C> = Context<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>;
 
-impl<W: FieldExt, N: FieldExt> Context<W, N> {
+impl<W: BaseExt, N: FieldExt> Context<W, N> {
     pub fn new() -> Self {
         Self {
             records: Arc::new(Mutex::new(Records::default())),
@@ -115,7 +126,7 @@ impl<N: FieldExt> Records<N> {
         Ok(cells)
     }
 
-    pub fn _assign_to_range_chip<W: FieldExt>(
+    pub fn _assign_to_range_chip<W: BaseExt>(
         &self,
         region: &mut Region<'_, N>,
         range_chip: &RangeChip<W, N>,
@@ -196,7 +207,7 @@ impl<N: FieldExt> Records<N> {
         Ok(cells)
     }
 
-    pub fn assign_all<W: FieldExt>(
+    pub fn assign_all<W: BaseExt>(
         &self,
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
@@ -207,6 +218,13 @@ impl<N: FieldExt> Records<N> {
         let cells = vec![base_cells, range_cells];
         self._assign_permutation(region, &cells)?;
         Ok(cells)
+    }
+
+    pub fn enable_permute(&mut self, cell: &Cell) {
+        match cell.region {
+            Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
+            Chip::RangeChip => self.range_adv_record[cell.row].1 = true,
+        }
     }
 
     pub fn one_line(
@@ -237,10 +255,7 @@ impl<N: FieldExt> Records<N> {
                     let idx = Cell::new(Chip::BaseChip, i, offset);
 
                     self.base_adv_record[offset][i].1 = true;
-                    match cell.region {
-                        Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
-                        Chip::RangeChip => self.range_adv_record[cell.row].1 = true,
-                    }
+                    self.enable_permute(&cell);
 
                     self.permutations.push((cell, idx));
                 }
@@ -282,11 +297,10 @@ impl<N: FieldExt> Records<N> {
         match base.cell() {
             Some(cell) => {
                 let idx = Cell::new(Chip::BaseChip, i, offset);
+
                 self.base_adv_record[offset][i].1 = true;
-                match cell.region {
-                    Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
-                    Chip::RangeChip => self.range_adv_record[cell.row].1 = true,
-                }
+                self.enable_permute(&cell);
+
                 self.permutations.push((cell, idx));
             }
             _ => {}
