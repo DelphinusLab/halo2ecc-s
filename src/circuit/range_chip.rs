@@ -150,10 +150,13 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<N> for Context<W, N> {
     }
 
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N> {
-        let v = decompose_bn(bn, 1, &self.info().common_range_mask);
         let mut records = self.records.lock().unwrap();
-        let res = records.assign_range_value(*self.range_offset, v, RangeClass::Common);
-        *self.range_offset += MAX_CHUNKS + 1;
+        let res = records.assign_single_range_value(
+            *self.range_offset,
+            bn_to_field(bn),
+            RangeClass::Common,
+        );
+        *self.range_offset += 1;
         res
     }
 

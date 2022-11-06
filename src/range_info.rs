@@ -25,7 +25,7 @@ pub const LIMBS: usize = 4;
 
 pub const LIMB_BITS: usize = MAX_CHUNKS * COMMON_RANGE_BITS;
 
-pub const OVERFLOW_BITS: usize = 5;
+pub const OVERFLOW_BITS: usize = 6;
 pub const OVERFLOW_LIMIT: usize = 1 << OVERFLOW_BITS;
 pub const OVERFLOW_THRESHOLD: usize = 1 << (OVERFLOW_BITS - 2);
 
@@ -83,7 +83,7 @@ impl<N: FieldExt> RangeInfo<N> {
         assert!(COMMON_RANGE_BITS > OVERFLOW_BITS);
         // to ensure that v can be assigned by assign_nonleading_limb
         assert!(
-            &(BigUint::from(1u64) << COMMON_RANGE_BITS + 1 + OVERFLOW_LIMIT) < &self.limb_modulus
+            &(BigUint::from(1u64) << COMMON_RANGE_BITS + 1 + OVERFLOW_BITS) < &self.limb_modulus
         );
         // to ensure that v * limb_modulus would not overflow
         assert!(&(&self.limb_modulus * &self.limb_modulus) < &self.n_modulus);

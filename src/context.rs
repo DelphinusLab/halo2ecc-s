@@ -295,6 +295,32 @@ impl<N: FieldExt> Records<N> {
         self.base_adv_record[offset][i].0 = Some(base.value());
     }
 
+    pub fn assign_single_range_value(
+        &mut self,
+        offset: usize,
+        v: N,
+        leading_class: RangeClass,
+    ) -> AssignedValue<N> {
+        const EXTEND_SIZE: usize = 16;
+
+        let end_offset = offset + 1 + MAX_CHUNKS;
+
+        if end_offset >= self.range_adv_record.len() {
+            let to_len = (end_offset + EXTEND_SIZE) & !(EXTEND_SIZE - 1);
+            self.range_adv_record.resize(to_len, (None, false));
+            self.range_fix_record.resize(to_len, [None; 2]);
+        }
+
+        if end_offset >= self.range_height {
+            self.range_height = end_offset + 1;
+        }
+
+        self.range_fix_record[offset][1] = Some(N::from(leading_class as u64));
+        self.range_adv_record[offset].0 = Some(v);
+
+        AssignedValue::new(Chip::RangeChip, 0, offset, v)
+    }
+
     pub fn assign_range_value(
         &mut self,
         offset: usize,

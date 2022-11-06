@@ -11,8 +11,8 @@ use crate::{
     pair,
 };
 
-pub const VAR_COLUMNS: usize = 4;
-pub const MUL_COLUMNS: usize = 1;
+pub const VAR_COLUMNS: usize = 5;
+pub const MUL_COLUMNS: usize = 2;
 pub const FIXED_COLUMNS: usize = VAR_COLUMNS + MUL_COLUMNS + 2;
 
 #[derive(Clone, Debug)]
