@@ -2,6 +2,7 @@ use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Curve;
+use halo2_proofs::pairing::group::Group;
 use num_integer::Integer;
 
 use super::base_chip::BaseChipOps;
@@ -107,10 +108,13 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
 
     fn assign_constant_point(&mut self, c: &C::CurveExt) -> AssignedPoint<C, C::ScalarExt> {
         let coordinates = c.to_affine().coordinates();
-        let t: Option<_> = coordinates
-            .map(|v| (v.x().clone(), v.y().clone(), C::ScalarExt::zero()))
-            .into();
-        let (x, y, z) = t.unwrap_or((C::Base::zero(), C::Base::zero(), C::ScalarExt::one()));
+        let t: Option<_> = coordinates.map(|v| (v.x().clone(), v.y().clone())).into();
+        let (x, y) = t.unwrap_or((C::Base::zero(), C::Base::zero()));
+        let z = if c.is_identity().into() {
+            C::ScalarExt::one()
+        } else {
+            C::ScalarExt::zero()
+        };
 
         let x = self.assign_int_constant(x);
         let y = self.assign_int_constant(y);
@@ -121,13 +125,16 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
 
     fn assign_point(&mut self, c: &<C as CurveAffine>::CurveExt) -> AssignedPoint<C, C::ScalarExt> {
         let coordinates = c.to_affine().coordinates();
-        let t: Option<_> = coordinates
-            .map(|v| (v.x().clone(), v.y().clone(), C::ScalarExt::zero()))
-            .into();
-        let (_x, _y, z) = t.unwrap_or((C::Base::zero(), C::Base::zero(), C::ScalarExt::one()));
+        let t: Option<_> = coordinates.map(|v| (v.x().clone(), v.y().clone())).into();
+        let (x, y) = t.unwrap_or((C::Base::zero(), C::Base::zero()));
+        let z = if c.is_identity().into() {
+            C::ScalarExt::one()
+        } else {
+            C::ScalarExt::zero()
+        };
 
-        let x = self.assign_w(&field_to_bn(&_x));
-        let y = self.assign_w(&field_to_bn(&_y));
+        let x = self.assign_w(&field_to_bn(&x));
+        let y = self.assign_w(&field_to_bn(&y));
         let z = self.assign_bit(z);
 
         // Constrain y^2 = x^3 + b
