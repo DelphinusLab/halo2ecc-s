@@ -3,6 +3,7 @@ use halo2_proofs::arithmetic::Field;
 use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Curve;
 use halo2_proofs::pairing::group::Group;
+use num_bigint::BigUint;
 use num_integer::Integer;
 
 use super::base_chip::BaseChipOps;
@@ -11,6 +12,7 @@ use crate::assign::{AssignedCondition, AssignedCurvature, AssignedPoint};
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::context::{Context, EccContext};
 use crate::pair;
+use crate::range_info::LIMB_BITS;
 use crate::utils::{bn_to_field, field_to_bn};
 
 const WINDOW_SIZE: usize = 4usize;
@@ -34,7 +36,10 @@ pub trait EccChipOps<C: CurveAffine> {
         let p: C::CurveExt = C::generator() * scalar;
         self.assign_point(&p)
     }
-
+    fn ecc_encode(
+        &mut self,
+        p: &AssignedPoint<C, C::ScalarExt>,
+    ) -> Vec<AssignedValue<C::ScalarExt>>;
     fn ecc_mul(
         &mut self,
         a: &AssignedPoint<C, C::ScalarExt>,
@@ -469,5 +474,35 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
 
         let (z, v) = self.int_div(&numerator, &denominator);
         AssignedPointWithCurvature::new(a.x, a.y, a.z, AssignedCurvature(v, z))
+    }
+
+    fn ecc_encode(
+        &mut self,
+        p: &AssignedPoint<C, C::ScalarExt>,
+    ) -> Vec<AssignedValue<C::ScalarExt>> {
+        let p = self.ecc_reduce(&p);
+        let shift = bn_to_field(&(BigUint::from(1u64) << LIMB_BITS));
+        let s0 = self.sum_with_constant(
+            vec![
+                (&p.x.limbs_le[0], C::ScalarExt::one()),
+                (&p.x.limbs_le[1], shift),
+            ],
+            None,
+        );
+        let s1 = self.sum_with_constant(
+            vec![
+                (&p.x.limbs_le[2], C::ScalarExt::one()),
+                (&p.y.limbs_le[0], shift),
+            ],
+            None,
+        );
+        let s2 = self.sum_with_constant(
+            vec![
+                (&p.y.limbs_le[1], C::ScalarExt::one()),
+                (&p.y.limbs_le[2], shift),
+            ],
+            None,
+        );
+        vec![s0, s1, s2]
     }
 }
