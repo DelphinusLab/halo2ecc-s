@@ -139,19 +139,13 @@ pub trait BaseChipOps<N: FieldExt> {
         if elems.len() < columns {
             self.sum_with_constant_in_one_line(elems, constant)
         } else {
-            let (mut curr, mut tail) = elems.split_at(columns - 1);
+            let (curr, tail) = elems.split_at(columns - 1);
             let mut acc = self.sum_with_constant_in_one_line(Vec::from(curr), constant);
 
-            while tail.len() + 2 > columns {
-                (curr, tail) = tail.split_at(columns - 2);
-                acc = self.sum_with_constant_in_one_line(
-                    vec![curr, &[(&acc, N::one())]].concat(),
-                    constant,
-                );
+            for chunk in tail.chunks(columns - 2) {
+                let elems = vec![chunk, &[(&acc, N::one())]].concat();
+                acc = self.sum_with_constant_in_one_line(elems, None);
             }
-
-            acc = self
-                .sum_with_constant_in_one_line(vec![tail, &[(&acc, N::one())]].concat(), constant);
             acc
         }
     }
