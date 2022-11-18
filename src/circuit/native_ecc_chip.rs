@@ -15,8 +15,6 @@ use crate::pair;
 use crate::range_info::LIMB_BITS;
 use crate::utils::{bn_to_field, field_to_bn};
 
-const WINDOW_SIZE: usize = 4usize;
-
 pub trait EccChipOps<C: CurveAffine> {
     type AssignedScalar;
     fn assign_constant_point(&mut self, c: &C::CurveExt) -> AssignedPoint<C, C::ScalarExt>;
@@ -102,10 +100,196 @@ pub trait EccChipOps<C: CurveAffine> {
         a: &AssignedPoint<C, C::ScalarExt>,
         b: &AssignedPoint<C, C::ScalarExt>,
     ) -> AssignedPoint<C, C::ScalarExt>;
-    fn decompose_scalar(
+    fn decompose_scalar<const WINDOW_SIZE: usize>(
         &mut self,
         s: &AssignedValue<C::ScalarExt>,
     ) -> Vec<[AssignedCondition<C::ScalarExt>; WINDOW_SIZE]>;
+}
+
+pub trait EccChipAlgorithms<C: CurveAffine> {
+    fn msm_batch_on_group(
+        &mut self,
+        points: &Vec<AssignedPoint<C, C::ScalarExt>>,
+        scalars: &Vec<AssignedValue<C::ScalarExt>>,
+    ) -> AssignedPoint<C, C::ScalarExt>;
+
+    fn msm_batch_on_window(
+        &mut self,
+        points: &Vec<AssignedPoint<C, C::ScalarExt>>,
+        scalars: &Vec<AssignedValue<C::ScalarExt>>,
+    ) -> AssignedPoint<C, C::ScalarExt>;
+}
+
+impl<C: CurveAffine> EccChipAlgorithms<C> for EccContext<C> {
+    // like pipengier
+    fn msm_batch_on_group(
+        &mut self,
+        points: &Vec<AssignedPoint<C, C::ScalarExt>>,
+        scalars: &Vec<AssignedValue<C::ScalarExt>>,
+    ) -> AssignedPoint<C, C::ScalarExt> {
+        let best_group_size = 3;
+        let n_group = (points.len() + best_group_size - 1) / best_group_size;
+        let group_size = (points.len() + n_group - 1) / n_group;
+
+        let identity = self.assign_identity();
+
+        let mut candidates = vec![];
+        for chunk in points.chunks(group_size) {
+            candidates.push(vec![identity.clone()]);
+            let cl = candidates.last_mut().unwrap();
+            for i in 1..1u32 << chunk.len() {
+                let pos = 32 - i.leading_zeros() - 1;
+                let other = i - (1 << pos);
+                let p = self.ecc_add(&cl[other as usize], &chunk[pos as usize]);
+                let p = self.to_point_with_curvature(&p);
+                cl.push(p);
+            }
+        }
+
+        let pick_candidate =
+            |ops: &mut Context<_, _>,
+             gi: usize,
+             group_bits: &Vec<AssignedCondition<C::ScalarExt>>| {
+                let mut curr_candidates: Vec<_> = candidates[gi].clone();
+                for bit in group_bits {
+                    let mut next_candidates = vec![];
+
+                    for it in curr_candidates.chunks(2) {
+                        let a0 = &it[0];
+                        let a1 = &it[1];
+
+                        let cell = ops.bisec_point_with_curvature(&bit, a1, a0);
+                        next_candidates.push(cell);
+                    }
+                    curr_candidates = next_candidates;
+                }
+
+                assert_eq!(curr_candidates.len(), 1);
+                curr_candidates[0].clone()
+            };
+
+        let bits = scalars
+            .into_iter()
+            .map(|s| EccChipOps::<C>::decompose_scalar(self, s))
+            .collect::<Vec<Vec<[AssignedCondition<C::ScalarExt>; 1]>>>();
+
+        let groups = bits.chunks(group_size).collect::<Vec<_>>();
+
+        let mut acc = None;
+
+        for wi in 0..bits[0].len() {
+            let mut inner_acc = None;
+            for gi in 0..groups.len() {
+                let group_bits = groups[gi].iter().map(|bits| bits[wi][0]).collect();
+                let ci = pick_candidate(self, gi, &group_bits);
+
+                match inner_acc {
+                    None => inner_acc = Some(ci.to_point()),
+                    Some(_inner_acc) => {
+                        let p = self.ecc_add(&ci, &_inner_acc);
+                        inner_acc = Some(p);
+                    }
+                }
+            }
+
+            match acc {
+                None => acc = inner_acc,
+                Some(_acc) => {
+                    let p = self.to_point_with_curvature(&_acc);
+                    let p = self.ecc_double(&p);
+                    let p = self.to_point_with_curvature(&p);
+                    acc = Some(self.ecc_add(&p, &inner_acc.unwrap()));
+                }
+            }
+        }
+
+        acc.unwrap()
+    }
+
+    //like shamir
+    fn msm_batch_on_window(
+        &mut self,
+        points: &Vec<AssignedPoint<C, C::ScalarExt>>,
+        scalars: &Vec<AssignedValue<C::ScalarExt>>,
+    ) -> AssignedPoint<C, C::ScalarExt> {
+        const WINDOW_SIZE: usize = 4;
+        assert!(points.len() == scalars.len());
+
+        // TODO: can be parallel
+        let windows_in_be = scalars
+            .into_iter()
+            .map(|s| EccChipOps::<C>::decompose_scalar(self, s))
+            .collect::<Vec<Vec<[AssignedCondition<C::ScalarExt>; WINDOW_SIZE]>>>();
+
+        let identity = self.assign_identity();
+
+        // TODO: can be parallel
+        let point_candidates: Vec<Vec<AssignedPointWithCurvature<_, _>>> = points
+            .iter()
+            .map(|a| {
+                let mut candidates = vec![identity.clone(), self.to_point_with_curvature(a)];
+                for i in 2..(1 << WINDOW_SIZE) {
+                    let ai = self.ecc_add(&candidates[i - 1], a);
+                    let ai = self.to_point_with_curvature(&ai);
+                    candidates.push(ai)
+                }
+                candidates
+            })
+            .collect::<Vec<_>>();
+
+        let pick_candidate =
+            |ops: &mut Context<_, _>,
+             pi: usize,
+             bits_in_le: &[AssignedCondition<C::ScalarExt>; WINDOW_SIZE]| {
+                let mut curr_candidates: Vec<_> = point_candidates[pi].clone();
+                for bit in bits_in_le {
+                    let mut next_candidates = vec![];
+
+                    for it in curr_candidates.chunks(2) {
+                        let a0 = &it[0];
+                        let a1 = &it[1];
+
+                        let cell = ops.bisec_point_with_curvature(&bit, a1, a0);
+                        next_candidates.push(cell);
+                    }
+                    curr_candidates = next_candidates;
+                }
+                assert_eq!(curr_candidates.len(), 1);
+                curr_candidates[0].clone()
+            };
+
+        let mut acc = None;
+
+        for wi in 0..windows_in_be[0].len() {
+            let mut inner_acc = None;
+            // TODO: can be parallel
+            for pi in 0..points.len() {
+                let ci = pick_candidate(self, pi, &windows_in_be[pi][wi]);
+                match inner_acc {
+                    None => inner_acc = Some(ci.to_point()),
+                    Some(_inner_acc) => {
+                        let p = self.ecc_add(&ci, &_inner_acc);
+                        inner_acc = Some(p);
+                    }
+                }
+            }
+
+            match acc {
+                None => acc = inner_acc,
+                Some(mut _acc) => {
+                    for _ in 0..WINDOW_SIZE {
+                        let p = self.to_point_with_curvature(&_acc);
+                        _acc = self.ecc_double(&p);
+                    }
+                    let p = self.to_point_with_curvature(&inner_acc.unwrap());
+                    _acc = self.ecc_add(&p, &_acc);
+                    acc = Some(_acc);
+                }
+            }
+        }
+
+        acc.unwrap()
+    }
 }
 
 impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
@@ -310,7 +494,7 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
         self.bisec_point(&z, &identity.to_point(), &AssignedPoint::new(x, y, z))
     }
 
-    fn decompose_scalar(
+    fn decompose_scalar<const WINDOW_SIZE: usize>(
         &mut self,
         s: &AssignedValue<C::ScalarExt>,
     ) -> Vec<[AssignedCondition<C::ScalarExt>; WINDOW_SIZE]> {
@@ -322,6 +506,7 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
 
         let s_bn = field_to_bn(&s.val);
         let mut v = s.clone();
+
         for i in 0..<C::ScalarExt as PrimeField>::NUM_BITS as u64 / 2 {
             let b0 = if s_bn.bit(i * 2) {
                 C::ScalarExt::one()
@@ -361,7 +546,7 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
             self.assert_constant(&v, C::ScalarExt::zero())
         }
 
-        let rem = <C::ScalarExt as PrimeField>::NUM_BITS as usize % 4;
+        let rem = <C::ScalarExt as PrimeField>::NUM_BITS as usize % WINDOW_SIZE;
         if rem > 0 {
             let zero = self.assign_constant(C::ScalarExt::zero());
             for _ in 0..WINDOW_SIZE - rem {
@@ -383,84 +568,11 @@ impl<C: CurveAffine> EccChipOps<C> for EccContext<C> {
         points: &Vec<AssignedPoint<C, C::ScalarExt>>,
         scalars: &Vec<Self::AssignedScalar>,
     ) -> AssignedPoint<C, C::ScalarExt> {
-        assert!(WINDOW_SIZE >= 1usize);
-        assert!(points.len() == scalars.len());
-
-        // TODO: can be parallel
-        let windows_in_be = scalars
-            .into_iter()
-            .map(|s| EccChipOps::<C>::decompose_scalar(self, s))
-            .collect::<Vec<Vec<[AssignedCondition<C::ScalarExt>; WINDOW_SIZE]>>>();
-
-        let identity = self.assign_identity();
-
-        // TODO: can be parallel
-        let point_candidates: Vec<Vec<AssignedPointWithCurvature<_, _>>> = points
-            .iter()
-            .map(|a| {
-                let mut candidates = vec![identity.clone(), self.to_point_with_curvature(a)];
-                for i in 2..(1 << WINDOW_SIZE) {
-                    let ai = self.ecc_add(&candidates[i - 1], a);
-                    let ai = self.to_point_with_curvature(&ai);
-                    candidates.push(ai)
-                }
-                candidates
-            })
-            .collect::<Vec<_>>();
-
-        let pick_candidate =
-            |ops: &mut Context<_, _>,
-             pi: usize,
-             bits_in_le: &[AssignedCondition<C::ScalarExt>; WINDOW_SIZE]| {
-                let mut curr_candidates: Vec<_> = point_candidates[pi].clone();
-                for bit in bits_in_le {
-                    let mut next_candidates = vec![];
-
-                    for it in curr_candidates.chunks(2) {
-                        let a0 = &it[0];
-                        let a1 = &it[1];
-
-                        let cell = ops.bisec_point_with_curvature(&bit, a1, a0);
-                        next_candidates.push(cell);
-                    }
-                    curr_candidates = next_candidates;
-                }
-
-                assert_eq!(curr_candidates.len(), 1);
-                curr_candidates[0].clone()
-            };
-
-        let mut acc = None;
-
-        for wi in 0..windows_in_be[0].len() {
-            let mut inner_acc = None;
-            // TODO: can be parallel
-            for pi in 0..points.len() {
-                let ci = pick_candidate(self, pi, &windows_in_be[pi][wi]);
-                match inner_acc {
-                    None => inner_acc = Some(ci.to_point()),
-                    Some(_inner_acc) => {
-                        let p = self.ecc_add(&ci, &_inner_acc);
-                        inner_acc = Some(p);
-                    }
-                }
-            }
-
-            match acc {
-                None => acc = inner_acc,
-                Some(mut _acc) => {
-                    for _ in 0..WINDOW_SIZE {
-                        let p = self.to_point_with_curvature(&_acc);
-                        _acc = self.ecc_double(&p);
-                    }
-                    let p = self.to_point_with_curvature(&inner_acc.unwrap());
-                    _acc = self.ecc_add(&p, &_acc);
-                    acc = Some(_acc);
-                }
-            }
+        if points.len() >= 3 {
+            self.msm_batch_on_group(points, scalars)
+        } else {
+            self.msm_batch_on_window(points, scalars)
         }
-
-        acc.unwrap()
     }
 
     fn to_point_with_curvature(
