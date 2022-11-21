@@ -18,6 +18,6 @@ rand = "0.8"
 rand_xorshift = "0.3"
 ark-std = { version = "0.3", features = ["print-trace"] }
 
-[feature]
+[features]
 default = []
 cuda = ["halo2_proofs/cuda"]
