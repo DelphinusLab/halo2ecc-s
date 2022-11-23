@@ -72,6 +72,29 @@ pub struct Records<N: FieldExt> {
 }
 
 impl<N: FieldExt> Records<N> {
+    fn assign_for_max_row(
+        &self,
+        region: &mut Region<'_, N>,
+        base_chip: &BaseChip<N>,
+        max_row: usize,
+    ) -> Result<bool, Error> {
+        let adv_cell = region.assign_advice(
+            || "base",
+            base_chip.config.base[0],
+            max_row,
+            || Ok(N::zero()),
+        )?;
+
+        let fixed_cell = region.assign_fixed(
+            || "base",
+            base_chip.config.coeff[0],
+            max_row,
+            || Ok(N::zero()),
+        )?;
+
+        Ok(adv_cell.value().is_none() && fixed_cell.value().is_none())
+    }
+
     fn _assign_to_base_chip(
         &self,
         region: &mut Region<'_, N>,
@@ -205,6 +228,25 @@ impl<N: FieldExt> Records<N> {
         let cells = vec![cells];
         self._assign_permutation(region, &cells)?;
         Ok(cells)
+    }
+
+    pub fn assign_all_opt<W: BaseExt>(
+        &self,
+        region: &mut Region<'_, N>,
+        base_chip: &BaseChip<N>,
+        range_chip: &RangeChip<W, N>,
+    ) -> Result<Option<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>>, Error> {
+        let max_row = usize::max(self.base_height, self.range_height);
+        let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
+        if !is_assign_for_max_row {
+            let base_cells = self._assign_to_base_chip(region, base_chip)?;
+            let range_cells = self._assign_to_range_chip(region, range_chip)?;
+            let cells = vec![base_cells, range_cells];
+            self._assign_permutation(region, &cells)?;
+            Ok(Some(cells))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn assign_all<W: BaseExt>(
