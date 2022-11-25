@@ -13,7 +13,8 @@ const CLASS_SHIFT_BITS: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct RangeChipConfig {
-    pub range_table_column: TableColumn,
+    pub max_range_table_column: TableColumn,
+    pub tag_range_table_column: TableColumn,
     pub block_first: Column<Fixed>,
     pub range_class: Column<Fixed>,
     pub value: Column<Advice>,
@@ -35,12 +36,13 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
     pub fn configure(meta: &mut ConstraintSystem<N>) -> RangeChipConfig {
         let block_first = meta.fixed_column();
         let range_class = meta.fixed_column();
-        let range_table_column = meta.lookup_table_column();
+        let tag_range_table_column = meta.lookup_table_column();
+        let max_range_table_column = meta.lookup_table_column();
         let value = meta.advice_column();
 
         meta.enable_equality(value);
 
-        meta.lookup("range check", |meta| {
+        meta.lookup("tag range check", |meta| {
             let class = meta.query_fixed(range_class, Rotation::cur());
             let is_block_first = meta.query_fixed(block_first, Rotation::cur());
             let v = meta.query_advice(value, Rotation::cur());
@@ -49,7 +51,17 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
             vec![(
                 (class * Expression::Constant(class_shift) + v)
                     * (Expression::Constant(N::one()) - is_block_first),
-                range_table_column,
+                tag_range_table_column,
+            )]
+        });
+
+        meta.lookup("max range check", |meta| {
+            let is_block_first = meta.query_fixed(block_first, Rotation::cur());
+            let v = meta.query_advice(value, Rotation::cur());
+
+            vec![(
+                v * (Expression::Constant(N::one()) - is_block_first),
+                max_range_table_column,
             )]
         });
 
@@ -69,7 +81,8 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
         });
 
         RangeChipConfig {
-            range_table_column,
+            max_range_table_column,
+            tag_range_table_column,
             block_first,
             range_class,
             value,
@@ -82,6 +95,27 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
         range_info: &RangeInfo<N>,
     ) -> Result<(), Error> {
         let class_shift = bn_to_field::<N>(&(BigUint::from(1u64) << CLASS_SHIFT_BITS));
+
+        assert!(COMMON_RANGE_BITS >= range_info.d_leading_bits);
+        assert!(COMMON_RANGE_BITS >= range_info.w_ceil_leading_bits);
+        assert!(COMMON_RANGE_BITS >= range_info.n_floor_leading_bits);
+
+        layouter.assign_table(
+            || "common range table",
+            |mut table| {
+                for i in 0..1 << COMMON_RANGE_BITS {
+                    table.assign_cell(
+                        || "range table",
+                        self.config.max_range_table_column,
+                        i,
+                        || Ok(N::from(i as u64)),
+                    )?;
+                }
+
+                Ok(())
+            },
+        )?;
+
         layouter.assign_table(
             || "common range table",
             |mut table| {
@@ -89,7 +123,7 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
 
                 table.assign_cell(
                     || "range table",
-                    self.config.range_table_column,
+                    self.config.tag_range_table_column,
                     offset,
                     || Ok(N::from(0u64)),
                 )?;
@@ -101,7 +135,7 @@ impl<W: BaseExt, N: FieldExt> RangeChip<W, N> {
                         for i in 0..1 << $bits {
                             table.assign_cell(
                                 || "range table",
-                                self.config.range_table_column,
+                                self.config.tag_range_table_column,
                                 offset,
                                 || Ok(prefix + N::from(i as u64)),
                             )?;
