@@ -14,8 +14,9 @@ use rand::rngs::OsRng;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[test]
-fn test_bn256_pairing_chip_over_bn256_fr() {
+use super::bench_circuit_on_bn256;
+
+fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1Affine> {
     {
         let ctx = Rc::new(RefCell::new(Context::new()));
         let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
@@ -89,6 +90,18 @@ fn test_bn256_pairing_chip_over_bn256_fr() {
 
         ctx.check_pairing(&[(&a, &b), (&neg_a, &b)]);
 
-        run_circuit_on_bn256(ctx.into(), 22);
+        ctx
     }
+}
+
+#[test]
+fn test_bn256_pairing_chip_over_bn256_fr() {
+    let ctx = build_bn256_pairing_chip_over_bn256_fr_circuit();
+    run_circuit_on_bn256(ctx.into(), 22);
+}
+
+#[test]
+fn bench_bn256_pairing_chip_over_bn256_fr() {
+    let ctx = build_bn256_pairing_chip_over_bn256_fr_circuit();
+    bench_circuit_on_bn256(ctx.into(), 22);
 }

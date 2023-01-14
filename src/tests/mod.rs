@@ -5,10 +5,15 @@ use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
     circuit::{Layouter, SimpleFloorPlanner},
     dev::MockProver,
-    pairing::bn256::Fr,
-    plonk::{Circuit, ConstraintSystem, Error},
+    pairing::bn256::{Bn256, Fr, G1Affine},
+    plonk::{
+        create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ConstraintSystem, Error,
+        SingleVerifier,
+    },
+    poly::commitment::{Params, ParamsVerifier},
+    transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
-use rand::SeedableRng;
+use rand::{rngs::OsRng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
 use crate::{
@@ -117,4 +122,51 @@ pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
         Err(e) => panic!("{:#?}", e),
     };
     assert_eq!(prover.verify(), Ok(()));
+}
+
+pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
+    println!("offset {} {}", ctx.range_offset, ctx.base_offset);
+
+    let circuit = TestCircuit::<Fr> {
+        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+    };
+
+    let timer = start_timer!(|| format!("build params with K = {}", k));
+    let params: Params<G1Affine> = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+    end_timer!(timer);
+
+    let timer = start_timer!(|| "build vk");
+    let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+    end_timer!(timer);
+
+    let vk_for_verify = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+
+    let timer = start_timer!(|| "build pk");
+    let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+    end_timer!(timer);
+
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+
+    let timer = start_timer!(|| "create proof");
+    create_proof(&params, &pk, &[circuit], &[&[]], OsRng, &mut transcript)
+        .expect("proof generation should not fail");
+    end_timer!(timer);
+
+    let proof = transcript.finalize();
+
+    let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
+
+    let strategy = SingleVerifier::new(&params_verifier);
+    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+
+    let timer = start_timer!(|| "verify proof");
+    verify_proof(
+        &params_verifier,
+        &vk_for_verify,
+        strategy,
+        &[&[]],
+        &mut transcript,
+    )
+    .unwrap();
+    end_timer!(timer);
 }

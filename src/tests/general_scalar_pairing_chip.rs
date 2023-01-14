@@ -15,8 +15,9 @@ use rand::rngs::OsRng;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[test]
-fn test_bls12_381_pairing_chip_over_bn256_fr() {
+use super::bench_circuit_on_bn256;
+
+fn build_bls12_381_pairing_chip_over_bn256_fr_circuit() -> GeneralScalarEccContext<G1Affine, Fr> {
     {
         let ctx = Rc::new(RefCell::new(Context::new()));
         let mut ctx = GeneralScalarEccContext::<G1Affine, Fr>::new(ctx);
@@ -100,7 +101,18 @@ fn test_bls12_381_pairing_chip_over_bn256_fr() {
         let ac = ctx.assign_point(&ac);
 
         ctx.check_pairing(&[(&ac, &b), (&neg_a, &bc)]);
-
-        run_circuit_on_bn256(ctx.into(), 22);
+        ctx
     }
+}
+
+#[test]
+fn test_bls12_381_pairing_chip_over_bn256_fr() {
+    let ctx = build_bls12_381_pairing_chip_over_bn256_fr_circuit();
+    run_circuit_on_bn256(ctx.into(), 22);
+}
+
+#[test]
+fn bench_bls12_381_pairing_chip_over_bn256_fr() {
+    let ctx = build_bls12_381_pairing_chip_over_bn256_fr_circuit();
+    bench_circuit_on_bn256(ctx.into(), 22);
 }
