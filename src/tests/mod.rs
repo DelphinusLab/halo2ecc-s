@@ -20,6 +20,7 @@ use crate::{
     circuit::{
         base_chip::{BaseChip, BaseChipConfig},
         range_chip::{RangeChip, RangeChipConfig},
+        select_chip::{SelectChip, SelectChipConfig},
     },
     context::{Context, Records},
 };
@@ -61,6 +62,7 @@ fn random_bls12_381_fq() -> halo2_proofs::pairing::bls12_381::Fq {
 struct TestChipConfig {
     base_chip_config: BaseChipConfig,
     range_chip_config: RangeChipConfig,
+    select_chip_config: SelectChipConfig,
 }
 
 #[derive(Default, Clone)]
@@ -79,9 +81,11 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
         let base_chip_config = BaseChip::configure(meta);
         let range_chip_config = RangeChip::<N>::configure(meta);
+        let select_chip_config = SelectChip::<N>::configure(meta);
         TestChipConfig {
             base_chip_config,
             range_chip_config,
+            select_chip_config,
         }
     }
 
@@ -92,6 +96,7 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     ) -> Result<(), Error> {
         let base_chip = BaseChip::new(config.base_chip_config);
         let range_chip = RangeChip::<N>::new(config.range_chip_config);
+        let select_chip = SelectChip::<N>::new(config.select_chip_config);
 
         range_chip.init_table(&mut layouter)?;
 
@@ -100,7 +105,7 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
             |mut region| {
                 let timer = start_timer!(|| "assign");
                 self.records
-                    .assign_all(&mut region, &base_chip, &range_chip)?;
+                    .assign_all(&mut region, &base_chip, &range_chip, &select_chip)?;
                 end_timer!(timer);
                 Ok(())
             },
@@ -111,7 +116,7 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
 }
 
 pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
-    println!("offset {} {}", ctx.range_offset, ctx.base_offset);
+    println!("offset {} {} {}", ctx.range_offset, ctx.base_offset, ctx.select_offset);
 
     let circuit = TestCircuit::<Fr> {
         records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),

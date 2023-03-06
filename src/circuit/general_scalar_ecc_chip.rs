@@ -5,6 +5,7 @@ use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
 use super::integer_chip::IntegerChipOps;
+use super::select_chip::SelectChipOps;
 use crate::assign::AssignedCondition;
 use crate::assign::AssignedInteger;
 use crate::circuit::ecc_chip::EccChipBaseOps;
@@ -16,6 +17,9 @@ impl<C: CurveAffine, N: FieldExt> EccBaseIntegerChipWrapper<C::Base, N>
     for GeneralScalarEccContext<C, N>
 {
     fn base_integer_chip(&mut self) -> &mut dyn IntegerChipOps<C::Base, N> {
+        &mut self.base_integer_ctx
+    }
+    fn select_chip(&mut self) -> &mut dyn SelectChipOps<C::Base, N> {
         &mut self.base_integer_ctx
     }
 }

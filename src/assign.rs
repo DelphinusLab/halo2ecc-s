@@ -6,6 +6,7 @@ use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
 pub enum Chip {
     BaseChip = 0,
     RangeChip = 1,
+    SelectChip = 2,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

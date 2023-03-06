@@ -7,7 +7,8 @@ use halo2_proofs::pairing::group::Group;
 use num_bigint::BigUint;
 
 use super::integer_chip::IntegerChipOps;
-use crate::assign::{AssignedCondition, AssignedCurvature, AssignedPoint};
+use super::select_chip::SelectChipOps;
+use crate::assign::{AssignedCondition, AssignedCurvature, AssignedPoint, AssignedInteger};
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::utils::{bn_to_field, field_to_bn};
 
@@ -17,49 +18,37 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         &mut self,
         s: &Self::AssignedScalar,
     ) -> Vec<[AssignedCondition<N>; WINDOW_SIZE]>;
+
+
     // like pippenger
     fn msm_batch_on_group(
         &mut self,
         points: &Vec<AssignedPoint<C, N>>,
         scalars: &Vec<Self::AssignedScalar>,
     ) -> AssignedPoint<C, N> {
-        let best_group_size = 3;
+        let best_group_size = 5;
         let n_group = (points.len() + best_group_size - 1) / best_group_size;
         let group_size = (points.len() + n_group - 1) / n_group;
 
         let identity = self.assign_identity();
 
         let mut candidates = vec![];
+        let mut gindex = 0;
+
         for chunk in points.chunks(group_size) {
             candidates.push(vec![identity.clone()]);
+            self.assign_cache_point(&identity, gindex, 0 as usize);
             let cl = candidates.last_mut().unwrap();
             for i in 1..1u32 << chunk.len() {
                 let pos = 32 - i.leading_zeros() - 1;
                 let other = i - (1 << pos);
                 let p = self.ecc_add(&cl[other as usize], &chunk[pos as usize]);
                 let p = self.to_point_with_curvature(p);
+                self.assign_cache_point(&p, gindex, i as usize);
                 cl.push(p);
             }
+            gindex +=1;
         }
-
-        let pick_candidate = |ops: &mut Self, gi: usize, group_bits: &Vec<AssignedCondition<N>>| {
-            let mut curr_candidates: Vec<_> = candidates[gi].clone();
-            for bit in group_bits {
-                let mut next_candidates = vec![];
-
-                for it in curr_candidates.chunks(2) {
-                    let a0 = &it[0];
-                    let a1 = &it[1];
-
-                    let cell = ops.bisec_point_with_curvature(&bit, a1, a0);
-                    next_candidates.push(cell);
-                }
-                curr_candidates = next_candidates;
-            }
-
-            assert_eq!(curr_candidates.len(), 1);
-            curr_candidates[0].clone()
-        };
 
         let bits = scalars
             .into_iter()
@@ -74,7 +63,8 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             let mut inner_acc = None;
             for gi in 0..groups.len() {
                 let group_bits = groups[gi].iter().map(|bits| bits[wi][0]).collect();
-                let ci = pick_candidate(self, gi, &group_bits);
+                let (index_cell, ci) = self.pick_candidate(&candidates[gi], &group_bits);
+                self.assign_selected_point(&ci, &index_cell, gi);
 
                 match inner_acc {
                     None => inner_acc = Some(ci.to_point()),
@@ -202,6 +192,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
 
 pub trait EccBaseIntegerChipWrapper<W: BaseExt, N: FieldExt> {
     fn base_integer_chip(&mut self) -> &mut dyn IntegerChipOps<W, N>;
+    fn select_chip(&mut self) -> &mut dyn SelectChipOps<W, N>;
 }
 
 pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
@@ -448,5 +439,72 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
             None,
         );
         vec![s0, s1, s2]
+    }
+
+    fn assign_cache_integer(&mut self, p: &AssignedInteger<C::Base, N>, sc: usize, g: usize, offset: &mut usize) {
+        let limb_size = self.base_integer_chip().range_chip().info().limbs;
+        for j in 0..limb_size as usize {
+            self.select_chip().assign_cache_value(&p.limbs_le[j], *offset, g, sc);
+            *offset += 1;
+        }
+        self.select_chip().assign_cache_value(&p.native, *offset, g, sc);
+        *offset += 1;
+    }
+
+    fn assign_selected_integer(&mut self, p: &AssignedInteger<C::Base, N>, sc: &AssignedValue<N>, g: usize, offset: &mut usize) {
+        let limb_size = self.base_integer_chip().range_chip().info().limbs;
+        for j in 0..limb_size as usize {
+            self.select_chip().assign_selected_value(&p.limbs_le[j], *offset, g, sc);
+            *offset += 1;
+        }
+        self.select_chip().assign_selected_value(&p.native, *offset, g, sc);
+        *offset += 1;
+    }
+
+    fn assign_cache_point(&mut self, p: &AssignedPointWithCurvature<C, N>, g: usize, sc: usize) {
+        let mut i = 0;
+        self.assign_cache_integer(&p.x, sc, g, &mut i);
+        self.assign_cache_integer(&p.y, sc, g, &mut i);
+        self.select_chip().assign_cache_value(&p.z.0, i, g, sc);
+        i += 1;
+        self.assign_cache_integer(&p.curvature.0, sc, g, &mut i);
+        self.select_chip().assign_cache_value(&p.curvature.1.0, i, g, sc);
+    }
+
+    fn assign_selected_point(&mut self, p: &AssignedPointWithCurvature<C, N>, sc: &AssignedValue<N>, g: usize) {
+        let mut i = 0;
+        self.assign_selected_integer(&p.x, sc, g, &mut i);
+        self.assign_selected_integer(&p.y, sc, g, &mut i);
+        self.select_chip().assign_selected_value(&p.z.0, i, g, sc);
+        i += 1;
+        self.assign_selected_integer(&p.curvature.0, sc, g, &mut i);
+        self.select_chip().assign_selected_value(&p.curvature.1.0, i, g, sc);
+    }
+
+    fn pick_candidate(
+        &mut self,
+        candidates: &Vec<AssignedPointWithCurvature<C,N>>,
+        group_bits: &Vec<AssignedCondition<N>>
+    ) -> (AssignedValue<N>, AssignedPointWithCurvature<C, N>) {
+        let curr_candidates: Vec<_> = candidates.clone();
+        let mut group_bits = group_bits.clone();
+        group_bits.reverse();
+        let index = group_bits.iter().fold((0, 0), |(i, s), x| {
+            if x.0.val == N::zero() {
+                (i*2, s+1)
+            } else {
+                (i*2 + 1, s+1)
+            }
+        }).0;
+        let integer_chip = self.base_integer_chip();
+        let mut base_chip = integer_chip.base_chip();
+        let value_cell = base_chip.assign_constant(N::zero());
+        let one_cell = base_chip.assign_constant(N::one());
+        let index_cell = group_bits.iter().fold(value_cell, |acc, x| {
+            base_chip.mul_add(&x.0, &one_cell, N::one(), &acc, N::from(2u64))
+        });
+        //println!("index is: {:?}, cell is: {:?}", index, index_cell.val);
+        let ci = &curr_candidates[index];
+        (index_cell, ci.clone())
     }
 }
