@@ -22,6 +22,12 @@ pub trait Fq12BnSpecificOps<W: BaseExt, N: FieldExt> {
 }
 
 pub trait Fq2ChipOps<W: BaseExt, N: FieldExt>: EccBaseIntegerChipWrapper<W, N> {
+    fn fq2_reduce(&mut self, x: &AssignedFq2<W, N>) -> AssignedFq2<W, N> {
+        (
+            self.base_integer_chip().reduce(&x.0),
+            self.base_integer_chip().reduce(&x.1),
+        )
+    }
     fn fq2_assert_equal(&mut self, x: &AssignedFq2<W, N>, y: &AssignedFq2<W, N>) {
         self.base_integer_chip().assert_int_equal(&x.0, &y.0);
         self.base_integer_chip().assert_int_equal(&x.1, &y.1);
@@ -98,6 +104,13 @@ pub trait Fq2ChipOps<W: BaseExt, N: FieldExt>: EccBaseIntegerChipWrapper<W, N> {
 }
 
 pub trait Fq6ChipOps<W: BaseExt, N: FieldExt>: Fq2ChipOps<W, N> + Fq2BnSpecificOps<W, N> {
+    fn fq6_reduce(&mut self, x: &AssignedFq6<W, N>) -> AssignedFq6<W, N> {
+        (
+            self.fq2_reduce(&x.0),
+            self.fq2_reduce(&x.1),
+            self.fq2_reduce(&x.2),
+        )
+    }
     fn fq6_assert_equal(&mut self, x: &AssignedFq6<W, N>, y: &AssignedFq6<W, N>) {
         self.fq2_assert_equal(&x.0, &y.0);
         self.fq2_assert_equal(&x.1, &y.1);
@@ -274,6 +287,12 @@ pub trait Fq6ChipOps<W: BaseExt, N: FieldExt>: Fq2ChipOps<W, N> + Fq2BnSpecificO
 }
 
 pub trait Fq12ChipOps<W: BaseExt, N: FieldExt>: Fq6ChipOps<W, N> + Fq6BnSpecificOps<W, N> {
+    fn fq12_reduce(&mut self, x: &AssignedFq12<W, N>) -> AssignedFq12<W, N> {
+        (
+            self.fq6_reduce(&x.0),
+            self.fq6_reduce(&x.1),
+        )
+    }
     fn fq12_assert_one(&mut self, x: &AssignedFq12<W, N>) {
         let one = self.fq12_assign_one();
         self.fq12_assert_eq(x, &one);
