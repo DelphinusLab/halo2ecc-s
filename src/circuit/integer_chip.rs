@@ -249,7 +249,6 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
         (limbs.try_into().unwrap(), native)
     }
 
-    // to be adjust for bls12_381 on bn256
     fn reduce(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
         if a.times == 1 {
             return a.clone();
