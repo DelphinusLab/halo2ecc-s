@@ -19,6 +19,17 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         s: &Self::AssignedScalar,
     ) -> Vec<[AssignedCondition<N>; WINDOW_SIZE]>;
 
+    fn recude_point(&mut self, p: &AssignedPointWithCurvature<C, N>) -> AssignedPointWithCurvature<C, N> {
+        let ichip = self.base_integer_chip();
+        let x = ichip.reduce(&p.x);
+        let y = ichip.reduce(&p.y);
+        let z = p.z.clone();
+        let c = p.curvature.clone();
+        let c0 = ichip.reduce(&c.0);
+        let curvature = AssignedCurvature::<C,N>(c0, c.1);
+        AssignedPointWithCurvature {x, y, z, curvature}
+    }
+
 
     // like pippenger
     fn msm_batch_on_group(
@@ -65,6 +76,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
                 let group_bits = groups[gi].iter().map(|bits| bits[wi][0]).collect();
                 let (index_cell, ci) = self.pick_candidate(&candidates[gi], &group_bits);
                 self.assign_selected_point(&ci, &index_cell, gi);
+                let ci = self.recude_point(&ci);
 
                 match inner_acc {
                     None => inner_acc = Some(ci.to_point()),
