@@ -82,6 +82,8 @@ pub trait BaseChipOps<N: FieldExt> {
     fn var_columns(&mut self) -> usize;
     fn mul_columns(&mut self) -> usize;
 
+    fn enable_permute(&mut self, x: &AssignedValue<N>);
+
     fn one_line(
         &mut self,
         base_coeff_pairs: Vec<(ValueSchema<'_, N>, N)>,
@@ -478,6 +480,12 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
 
     fn mul_columns(&mut self) -> usize {
         MUL_COLUMNS
+    }
+
+
+    fn enable_permute(&mut self, x: &AssignedValue<N>) {
+        let mut records = self.records.lock().unwrap();
+        records.enable_permute(&x.cell);
     }
 
     fn one_line(
