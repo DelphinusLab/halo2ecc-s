@@ -8,7 +8,7 @@ use num_bigint::BigUint;
 
 use super::integer_chip::IntegerChipOps;
 use super::select_chip::SelectChipOps;
-use crate::assign::{AssignedCondition, AssignedCurvature, AssignedPoint, AssignedInteger};
+use crate::assign::{AssignedCondition, AssignedCurvature, AssignedInteger, AssignedPoint};
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::utils::{bn_to_field, field_to_bn};
 
@@ -47,7 +47,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
                 self.assign_cache_point(&p, group_index, i as usize);
                 cl.push(p);
             }
-            group_index +=1;
+            group_index += 1;
         }
 
         let bits = scalars
@@ -406,19 +406,22 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         self.bisec_point(&z, &identity.to_point(), &AssignedPoint::new(x, y, z))
     }
 
-    fn ecc_reduce_with_curvature(&mut self, a: &AssignedPoint<C, N>) -> AssignedPointWithCurvature<C, N> {
+    fn ecc_reduce_with_curvature(
+        &mut self,
+        a: &AssignedPoint<C, N>,
+    ) -> AssignedPointWithCurvature<C, N> {
         let a = self.ecc_reduce(a);
 
-         // 3 * x ^ 2 / 2 * y
-         let x_square = self.base_integer_chip().int_square(&a.x);
-         let numerator = self
-             .base_integer_chip()
-             .int_mul_small_constant(&x_square, 3);
-         let denominator = self.base_integer_chip().int_mul_small_constant(&a.y, 2);
+        // 3 * x ^ 2 / 2 * y
+        let x_square = self.base_integer_chip().int_square(&a.x);
+        let numerator = self
+            .base_integer_chip()
+            .int_mul_small_constant(&x_square, 3);
+        let denominator = self.base_integer_chip().int_mul_small_constant(&a.y, 2);
 
-         let (z, v) = self.base_integer_chip().int_div(&numerator, &denominator);
-         let v = self.base_integer_chip().reduce(&v);
-         AssignedPointWithCurvature::new(a.x, a.y, a.z, AssignedCurvature(v, z))
+        let (z, v) = self.base_integer_chip().int_div(&numerator, &denominator);
+        let v = self.base_integer_chip().reduce(&v);
+        AssignedPointWithCurvature::new(a.x, a.y, a.z, AssignedCurvature(v, z))
     }
 
     fn to_point_with_curvature(
@@ -456,23 +459,39 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         vec![s0, s1, s2]
     }
 
-    fn assign_cache_integer(&mut self, p: &AssignedInteger<C::Base, N>, sc: usize, g: usize, offset: &mut usize) {
+    fn assign_cache_integer(
+        &mut self,
+        p: &AssignedInteger<C::Base, N>,
+        sc: usize,
+        g: usize,
+        offset: &mut usize,
+    ) {
         let limb_size = self.base_integer_chip().range_chip().info().limbs;
         for j in 0..limb_size as usize {
-            self.select_chip().assign_cache_value(&p.limbs_le[j], *offset, g, sc);
+            self.select_chip()
+                .assign_cache_value(&p.limbs_le[j], *offset, g, sc);
             *offset += 1;
         }
-        self.select_chip().assign_cache_value(&p.native, *offset, g, sc);
+        self.select_chip()
+            .assign_cache_value(&p.native, *offset, g, sc);
         *offset += 1;
     }
 
-    fn assign_selected_integer(&mut self, p: &AssignedInteger<C::Base, N>, sc: &AssignedValue<N>, g: usize, offset: &mut usize) {
+    fn assign_selected_integer(
+        &mut self,
+        p: &AssignedInteger<C::Base, N>,
+        sc: &AssignedValue<N>,
+        g: usize,
+        offset: &mut usize,
+    ) {
         let limb_size = self.base_integer_chip().range_chip().info().limbs;
         for j in 0..limb_size as usize {
-            self.select_chip().assign_selected_value(&p.limbs_le[j], *offset, g, sc);
+            self.select_chip()
+                .assign_selected_value(&p.limbs_le[j], *offset, g, sc);
             *offset += 1;
         }
-        self.select_chip().assign_selected_value(&p.native, *offset, g, sc);
+        self.select_chip()
+            .assign_selected_value(&p.native, *offset, g, sc);
         *offset += 1;
     }
 
@@ -483,34 +502,44 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         self.select_chip().assign_cache_value(&p.z.0, i, g, sc);
         i += 1;
         self.assign_cache_integer(&p.curvature.0, sc, g, &mut i);
-        self.select_chip().assign_cache_value(&p.curvature.1.0, i, g, sc);
+        self.select_chip()
+            .assign_cache_value(&p.curvature.1 .0, i, g, sc);
     }
 
-    fn assign_selected_point(&mut self, p: &AssignedPointWithCurvature<C, N>, sc: &AssignedValue<N>, g: usize) {
+    fn assign_selected_point(
+        &mut self,
+        p: &AssignedPointWithCurvature<C, N>,
+        sc: &AssignedValue<N>,
+        g: usize,
+    ) {
         let mut i = 0;
         self.assign_selected_integer(&p.x, sc, g, &mut i);
         self.assign_selected_integer(&p.y, sc, g, &mut i);
         self.select_chip().assign_selected_value(&p.z.0, i, g, sc);
         i += 1;
         self.assign_selected_integer(&p.curvature.0, sc, g, &mut i);
-        self.select_chip().assign_selected_value(&p.curvature.1.0, i, g, sc);
+        self.select_chip()
+            .assign_selected_value(&p.curvature.1 .0, i, g, sc);
     }
 
     fn pick_candidate(
         &mut self,
-        candidates: &Vec<AssignedPointWithCurvature<C,N>>,
-        group_bits: &Vec<AssignedCondition<N>>
+        candidates: &Vec<AssignedPointWithCurvature<C, N>>,
+        group_bits: &Vec<AssignedCondition<N>>,
     ) -> (AssignedValue<N>, AssignedPointWithCurvature<C, N>) {
         let curr_candidates: Vec<_> = candidates.clone();
         let mut group_bits = group_bits.clone();
         group_bits.reverse();
-        let index = group_bits.iter().fold((0, 0), |(i, s), x| {
-            if x.0.val == N::zero() {
-                (i*2, s+1)
-            } else {
-                (i*2 + 1, s+1)
-            }
-        }).0;
+        let index = group_bits
+            .iter()
+            .fold((0, 0), |(i, s), x| {
+                if x.0.val == N::zero() {
+                    (i * 2, s + 1)
+                } else {
+                    (i * 2 + 1, s + 1)
+                }
+            })
+            .0;
         let integer_chip = self.base_integer_chip();
         let mut base_chip = integer_chip.base_chip();
         let value_cell = base_chip.assign_constant(N::zero());

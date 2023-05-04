@@ -2,7 +2,7 @@ use crate::{assign::AssignedValue, context::IntegerContext, range_info::*};
 
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
-    plonk::{Advice, Column, ConstraintSystem, Expression, Fixed },
+    plonk::{Advice, Column, ConstraintSystem, Expression, Fixed},
     poly::Rotation,
 };
 use std::{marker::PhantomData, sync::Arc, vec};
@@ -52,12 +52,15 @@ impl<N: FieldExt> SelectChip<N> {
             let encoded_offset = meta.query_fixed(encoded_offset, Rotation::cur());
             let is_lookup = meta.query_fixed(is_lookup, Rotation::cur());
 
-            let selector_encode_shift= N::from(1u64 << 20);
+            let selector_encode_shift = N::from(1u64 << 20);
 
             vec![
                 (limb_info.clone(), limb_info.clone()),
-                ((selector * selector_encode_shift + encoded_offset.clone()), encoded_offset.clone()),
-                (Expression::Constant(N::zero()), is_lookup.clone())//, (Expression::Constant(N::one())-is_lookup))
+                (
+                    (selector * selector_encode_shift + encoded_offset.clone()),
+                    encoded_offset.clone(),
+                ),
+                (Expression::Constant(N::zero()), is_lookup.clone()),
             ]
         });
 
@@ -68,17 +71,28 @@ impl<N: FieldExt> SelectChip<N> {
             is_lookup,
         }
     }
-
 }
 
 // A range info that implements limb assignment for W on N
 pub trait SelectChipOps<W: BaseExt, N: FieldExt> {
     fn info(&self) -> Arc<RangeInfo<W, N>>;
-    fn assign_cache_value(&mut self, v: &AssignedValue<N>, offset:usize, group_index: usize, selector: usize);
-    fn assign_selected_value(&mut self, v: &AssignedValue<N>, offset:usize, group_index:usize, selector: &AssignedValue<N>);
+    fn assign_cache_value(
+        &mut self,
+        v: &AssignedValue<N>,
+        offset: usize,
+        group_index: usize,
+        selector: usize,
+    );
+    fn assign_selected_value(
+        &mut self,
+        v: &AssignedValue<N>,
+        offset: usize,
+        group_index: usize,
+        selector: &AssignedValue<N>,
+    );
 }
 
-fn encode_offset(g:usize, offset: usize, limb_offset: usize) -> usize{
+fn encode_offset(g: usize, offset: usize, limb_offset: usize) -> usize {
     g * 1024 + limb_offset + (offset << 20)
 }
 
@@ -87,7 +101,13 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         self.info.clone()
     }
 
-    fn assign_cache_value(&mut self, v: &AssignedValue<N>, offset:usize, group_index: usize, selector: usize) {
+    fn assign_cache_value(
+        &mut self,
+        v: &AssignedValue<N>,
+        offset: usize,
+        group_index: usize,
+        selector: usize,
+    ) {
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
         let encoded_offset = encode_offset(group_index, selector, offset);
@@ -98,7 +118,13 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         );
         self.ctx.borrow_mut().select_offset += 1;
     }
-    fn assign_selected_value(&mut self, v: &AssignedValue<N>, offset:usize, group_index:usize, selector: &AssignedValue<N>) {
+    fn assign_selected_value(
+        &mut self,
+        v: &AssignedValue<N>,
+        offset: usize,
+        group_index: usize,
+        selector: &AssignedValue<N>,
+    ) {
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
         let encoded_offset = encode_offset(group_index, 0, offset);
@@ -106,7 +132,7 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
             self.ctx.borrow_mut().select_offset,
             v,
             N::from(encoded_offset as u64),
-            selector
+            selector,
         );
         self.ctx.borrow_mut().select_offset += 1;
     }
