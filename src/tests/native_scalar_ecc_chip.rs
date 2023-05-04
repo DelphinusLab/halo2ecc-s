@@ -14,7 +14,7 @@ use std::rc::Rc;
 fn test_native_ecc_chip() {
     let ctx = Rc::new(RefCell::new(Context::new()));
     let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
-    let mut ctx = NativeScalarEccContext(ctx);
+    let mut ctx = NativeScalarEccContext(ctx, 0);
 
     let mut points = vec![];
     let mut scalars = vec![];

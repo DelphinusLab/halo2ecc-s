@@ -82,8 +82,8 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
 
 pub struct NativeScalarEccContext<C: CurveAffine>(
     pub IntegerContext<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>,
+    pub usize, // msm prefix
 );
-
 
 impl<C: CurveAffine> From<NativeScalarEccContext<C>> for Context<C::Scalar> {
     fn from(value: NativeScalarEccContext<C>) -> Self {
@@ -95,6 +95,7 @@ pub struct GeneralScalarEccContext<C: CurveAffine, N: FieldExt> {
     pub base_integer_ctx: IntegerContext<<C as CurveAffine>::Base, N>,
     pub scalar_integer_ctx: IntegerContext<<C as CurveAffine>::ScalarExt, N>,
     pub native_ctx: Rc<RefCell<Context<N>>>,
+    pub msm_prefix: usize,
 }
 
 impl<C: CurveAffine, N: FieldExt> From<GeneralScalarEccContext<C, N>> for Context<N> {
@@ -111,6 +112,7 @@ impl<C: CurveAffine, N: FieldExt> GeneralScalarEccContext<C, N> {
             base_integer_ctx: IntegerContext::<C::Base, N>::new(ctx.clone()),
             scalar_integer_ctx: IntegerContext::<C::Scalar, N>::new(ctx.clone()),
             native_ctx: ctx,
+            msm_prefix: 0,
         }
     }
 }
@@ -303,23 +305,24 @@ impl<N: FieldExt> Records<N> {
                 break;
             }
             if fixes[0].is_some() {
-                region.assign_fixed(|| "encoded offset",
+                region.assign_fixed(
+                    || "encoded offset",
                     select_chip.config.encoded_offset,
                     row,
-                    || Ok(fixes[0].unwrap())
+                    || Ok(fixes[0].unwrap()),
                 )?;
             }
             if fixes[1].is_some() {
-                region.assign_fixed(|| "is_lookup",
+                region.assign_fixed(
+                    || "is_lookup",
                     select_chip.config.is_lookup,
                     row,
-                    || Ok(fixes[1].unwrap())
+                    || Ok(fixes[1].unwrap()),
                 )?;
             }
         }
         Ok(cells)
     }
-
 
     pub fn _assign_permutation(
         &self,
@@ -506,24 +509,18 @@ impl<N: FieldExt> Records<N> {
         AssignedValue::new(Chip::RangeChip, 0, offset, v)
     }
 
-    pub fn assign_cache_value(
-        &mut self,
-        offset: usize,
-        v: &AssignedValue<N>,
-        encode: N,
-    ) {
+    pub fn assign_cache_value(&mut self, offset: usize, v: &AssignedValue<N>, encode: N) {
         //println!("Cache [offset, v, encode] {:?} {:?} {:?}", offset, v.val, encode);
         if offset >= self.select_fix_record.len() {
-            self.select_adv_record
-                .resize(1<<20, [(None, false); 2]);
-            self.select_fix_record.resize(1<<20, [None; 2]);
+            self.select_adv_record.resize(1 << 20, [(None, false); 2]);
+            self.select_fix_record.resize(1 << 20, [None; 2]);
         }
 
         if offset >= self.select_height {
             self.select_height = offset + 1;
         }
 
-        assert!(offset < 1<<20);
+        assert!(offset < 1 << 20);
 
         self.select_adv_record[offset][0].0 = Some(v.val);
         let idx = Cell::new(Chip::SelectChip, 0, offset);
@@ -544,16 +541,15 @@ impl<N: FieldExt> Records<N> {
     ) {
         //println!("Select [offset, v, encode, value] {:?} {:?} {:?} {:?}", offset, v.val, encode, selector.val);
         if offset >= self.select_fix_record.len() {
-            self.select_adv_record
-                .resize(1<<20, [(None, false); 2]);
-            self.select_fix_record.resize(1<<20, [None; 2]);
+            self.select_adv_record.resize(1 << 20, [(None, false); 2]);
+            self.select_fix_record.resize(1 << 20, [None; 2]);
         }
 
         if offset >= self.select_height {
             self.select_height = offset + 1;
         }
 
-        assert!(offset < 1<<20);
+        assert!(offset < 1 << 20);
 
         self.select_adv_record[offset][0].0 = Some(v.val);
         self.select_adv_record[offset][1].0 = Some(selector.val);

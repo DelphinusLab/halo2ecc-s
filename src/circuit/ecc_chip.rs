@@ -12,8 +12,12 @@ use crate::assign::{AssignedCondition, AssignedCurvature, AssignedInteger, Assig
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::utils::{bn_to_field, field_to_bn};
 
+pub const MSM_PREFIX_SIZE: usize = 1 << 20;
+
 pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
     type AssignedScalar: Clone;
+
+    fn get_and_increase_msm_prefix(&mut self) -> usize;
 
     fn decompose_scalar<const WINDOW_SIZE: usize>(
         &mut self,
@@ -26,6 +30,8 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         points: &Vec<AssignedPoint<C, N>>,
         scalars: &Vec<Self::AssignedScalar>,
     ) -> AssignedPoint<C, N> {
+        assert!(points.len() <= MSM_PREFIX_SIZE);
+
         let best_group_size = 5;
         let n_group = (points.len() + best_group_size - 1) / best_group_size;
         let group_size = (points.len() + n_group - 1) / n_group;
@@ -33,7 +39,8 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         let identity = self.assign_identity();
 
         let mut candidates = vec![];
-        let mut group_index = 0;
+        let group_prefix = self.get_and_increase_msm_prefix();
+        let mut group_index = group_prefix;
 
         for chunk in points.chunks(group_size) {
             candidates.push(vec![identity.clone()]);
@@ -61,10 +68,10 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
 
         for wi in 0..bits[0].len() {
             let mut inner_acc = None;
-            for gi in 0..groups.len() {
-                let group_bits = groups[gi].iter().map(|bits| bits[wi][0]).collect();
-                let (index_cell, ci) = self.pick_candidate(&candidates[gi], &group_bits);
-                self.assign_selected_point(&ci, &index_cell, gi);
+            for group_index in 0..groups.len() {
+                let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
+                let (index_cell, ci) = self.pick_candidate(&candidates[group_index], &group_bits);
+                self.assign_selected_point(&ci, &index_cell, group_index + group_prefix);
 
                 match inner_acc {
                     None => inner_acc = Some(ci.to_point()),
