@@ -14,22 +14,11 @@ use crate::utils::{bn_to_field, field_to_bn};
 
 pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
     type AssignedScalar: Clone;
+
     fn decompose_scalar<const WINDOW_SIZE: usize>(
         &mut self,
         s: &Self::AssignedScalar,
     ) -> Vec<[AssignedCondition<N>; WINDOW_SIZE]>;
-
-    fn recude_point(&mut self, p: &AssignedPointWithCurvature<C, N>) -> AssignedPointWithCurvature<C, N> {
-        let ichip = self.base_integer_chip();
-        let x = ichip.reduce(&p.x);
-        let y = ichip.reduce(&p.y);
-        let z = p.z.clone();
-        let c = p.curvature.clone();
-        let c0 = ichip.reduce(&c.0);
-        let curvature = AssignedCurvature::<C,N>(c0, c.1);
-        AssignedPointWithCurvature {x, y, z, curvature}
-    }
-
 
     // like pippenger
     fn msm_batch_on_group(
@@ -44,21 +33,21 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         let identity = self.assign_identity();
 
         let mut candidates = vec![];
-        let mut gindex = 0;
+        let mut group_index = 0;
 
         for chunk in points.chunks(group_size) {
             candidates.push(vec![identity.clone()]);
-            self.assign_cache_point(&identity, gindex, 0 as usize);
+            self.assign_cache_point(&identity, group_index, 0 as usize);
             let cl = candidates.last_mut().unwrap();
             for i in 1..1u32 << chunk.len() {
                 let pos = 32 - i.leading_zeros() - 1;
                 let other = i - (1 << pos);
                 let p = self.ecc_add(&cl[other as usize], &chunk[pos as usize]);
-                let p = self.to_point_with_curvature(p);
-                self.assign_cache_point(&p, gindex, i as usize);
+                let p = self.ecc_reduce_with_curvature(&p);
+                self.assign_cache_point(&p, group_index, i as usize);
                 cl.push(p);
             }
-            gindex +=1;
+            group_index +=1;
         }
 
         let bits = scalars
@@ -76,7 +65,6 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
                 let group_bits = groups[gi].iter().map(|bits| bits[wi][0]).collect();
                 let (index_cell, ci) = self.pick_candidate(&candidates[gi], &group_bits);
                 self.assign_selected_point(&ci, &index_cell, gi);
-                let ci = self.recude_point(&ci);
 
                 match inner_acc {
                     None => inner_acc = Some(ci.to_point()),
@@ -416,6 +404,21 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
 
         let identity = self.assign_identity();
         self.bisec_point(&z, &identity.to_point(), &AssignedPoint::new(x, y, z))
+    }
+
+    fn ecc_reduce_with_curvature(&mut self, a: &AssignedPoint<C, N>) -> AssignedPointWithCurvature<C, N> {
+        let a = self.ecc_reduce(a);
+
+         // 3 * x ^ 2 / 2 * y
+         let x_square = self.base_integer_chip().int_square(&a.x);
+         let numerator = self
+             .base_integer_chip()
+             .int_mul_small_constant(&x_square, 3);
+         let denominator = self.base_integer_chip().int_mul_small_constant(&a.y, 2);
+
+         let (z, v) = self.base_integer_chip().int_div(&numerator, &denominator);
+         let v = self.base_integer_chip().reduce(&v);
+         AssignedPointWithCurvature::new(a.x, a.y, a.z, AssignedCurvature(v, z))
     }
 
     fn to_point_with_curvature(
