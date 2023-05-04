@@ -71,7 +71,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             for group_index in 0..groups.len() {
                 let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
                 let (index_cell, ci) = self.pick_candidate(&candidates[group_index], &group_bits);
-                self.assign_selected_point(&ci, &index_cell, group_index + group_prefix);
+                let ci = self.assign_selected_point(&ci, &index_cell, group_index + group_prefix);
 
                 match inner_acc {
                     None => inner_acc = Some(ci.to_point()),
@@ -490,16 +490,24 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         sc: &AssignedValue<N>,
         g: usize,
         offset: &mut usize,
-    ) {
+    ) -> AssignedInteger<C::Base, N> {
+        let mut limbs_le = vec![];
+
         let limb_size = self.base_integer_chip().range_chip().info().limbs;
         for j in 0..limb_size as usize {
-            self.select_chip()
+            let v = self
+                .select_chip()
                 .assign_selected_value(&p.limbs_le[j], *offset, g, sc);
+            limbs_le.push(v);
             *offset += 1;
         }
-        self.select_chip()
+
+        let native = self
+            .select_chip()
             .assign_selected_value(&p.native, *offset, g, sc);
         *offset += 1;
+
+        AssignedInteger::new(limbs_le, native, 1)
     }
 
     fn assign_cache_point(&mut self, p: &AssignedPointWithCurvature<C, N>, g: usize, sc: usize) {
@@ -518,15 +526,23 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         p: &AssignedPointWithCurvature<C, N>,
         sc: &AssignedValue<N>,
         g: usize,
-    ) {
+    ) -> AssignedPointWithCurvature<C, N> {
         let mut i = 0;
-        self.assign_selected_integer(&p.x, sc, g, &mut i);
-        self.assign_selected_integer(&p.y, sc, g, &mut i);
-        self.select_chip().assign_selected_value(&p.z.0, i, g, sc);
+        let x = self.assign_selected_integer(&p.x, sc, g, &mut i);
+        let y = self.assign_selected_integer(&p.y, sc, g, &mut i);
+        let z = self.select_chip().assign_selected_value(&p.z.0, i, g, sc);
         i += 1;
-        self.assign_selected_integer(&p.curvature.0, sc, g, &mut i);
-        self.select_chip()
+        let c_v = self.assign_selected_integer(&p.curvature.0, sc, g, &mut i);
+        let c_z = self
+            .select_chip()
             .assign_selected_value(&p.curvature.1 .0, i, g, sc);
+        // skip checking x y relation cause they are selected from well formed values
+        AssignedPointWithCurvature {
+            x,
+            y,
+            z: AssignedCondition(z),
+            curvature: AssignedCurvature(c_v, AssignedCondition(c_z)),
+        }
     }
 
     fn pick_candidate(

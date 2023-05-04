@@ -538,7 +538,7 @@ impl<N: FieldExt> Records<N> {
         v: &AssignedValue<N>,
         encode: N,
         selector: &AssignedValue<N>,
-    ) {
+    ) -> AssignedValue<N> {
         //println!("Select [offset, v, encode, value] {:?} {:?} {:?} {:?}", offset, v.val, encode, selector.val);
         if offset >= self.select_fix_record.len() {
             self.select_adv_record.resize(1 << 20, [(None, false); 2]);
@@ -553,16 +553,14 @@ impl<N: FieldExt> Records<N> {
 
         self.select_adv_record[offset][0].0 = Some(v.val);
         self.select_adv_record[offset][1].0 = Some(selector.val);
-        let adv_cell = Cell::new(Chip::SelectChip, 0, offset);
         let selector_cell = Cell::new(Chip::SelectChip, 1, offset);
-        self.permutations.push((adv_cell, v.cell));
         self.permutations.push((selector_cell, selector.cell));
-        self.enable_permute(&adv_cell);
-        self.enable_permute(&v.cell);
         self.enable_permute(&selector_cell);
         self.enable_permute(&selector.cell);
         self.select_fix_record[offset][0] = Some(encode);
         self.select_fix_record[offset][1] = Some(N::one());
+
+        AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
     }
 
     pub fn assign_range_value(

@@ -89,7 +89,7 @@ pub trait SelectChipOps<W: BaseExt, N: FieldExt> {
         offset: usize,
         group_index: usize,
         selector: &AssignedValue<N>,
-    );
+    ) -> AssignedValue<N>;
 }
 
 fn encode_offset(g: usize, offset: usize, limb_offset: usize) -> usize {
@@ -124,16 +124,17 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         offset: usize,
         group_index: usize,
         selector: &AssignedValue<N>,
-    ) {
+    ) -> AssignedValue<N> {
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
         let encoded_offset = encode_offset(group_index, 0, offset);
-        records.assign_select_value(
+        let v = records.assign_select_value(
             self.ctx.borrow_mut().select_offset,
             v,
             N::from(encoded_offset as u64),
             selector,
         );
         self.ctx.borrow_mut().select_offset += 1;
+        v
     }
 }
