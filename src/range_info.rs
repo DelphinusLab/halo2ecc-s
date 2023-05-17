@@ -6,16 +6,19 @@ use std::marker::PhantomData;
 
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
 use crate::circuit::range_chip::MAX_CHUNKS;
-use crate::utils::{bn_to_field, field_to_bn};
+use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+use crate::circuit::range_chip::VALUE_COLUMNS;
+use crate::utils::bn_to_field;
+use crate::utils::field_to_bn;
 
 #[derive(Debug, Clone)]
 pub struct RangeInfo<W: BaseExt, N: FieldExt> {
     pub limbs: u64,
     pub limb_bits: u64,
 
-    pub w_ceil_leading_chunks: u64,
-    pub n_floor_leading_chunks: u64,
-    pub d_leading_chunks: u64,
+    pub w_ceil_leading_decompose: u64,
+    pub n_floor_leading_decompose: u64,
+    pub d_leading_decompose: u64,
 
     pub w_ceil_bits: u64,
     pub d_leading_bits: u64,
@@ -49,12 +52,17 @@ pub struct RangeInfo<W: BaseExt, N: FieldExt> {
 }
 
 impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
-    fn bits_to_leading_bits_and_chunks(bits: u64, common_bits: u64) -> (u64, u64) {
+    fn bits_to_leading_bits_and_decompose(bits: u64, common_bits: u64) -> (u64, u64) {
+        assert!(bits > (VALUE_COLUMNS as u64 - 1) * MAX_CHUNKS * common_bits);
+
         let leading_chunk_bits = bits % common_bits;
         if leading_chunk_bits == 0 {
-            (common_bits, bits / common_bits % MAX_CHUNKS)
+            (common_bits, bits / common_bits % RANGE_VALUE_DECOMPOSE)
         } else {
-            (leading_chunk_bits, bits / common_bits % MAX_CHUNKS + 1)
+            (
+                leading_chunk_bits,
+                bits / common_bits % RANGE_VALUE_DECOMPOSE + 1,
+            )
         }
     }
 
@@ -63,21 +71,21 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
         let w_ceil_bits = w_max.bits();
         assert!(BigUint::from(1u64) << w_ceil_bits > w_max);
         assert!(BigUint::from(1u64) << (w_ceil_bits - 1) < w_max);
-        let (w_ceil_leading_bits, w_ceil_leading_chunks) =
-            Self::bits_to_leading_bits_and_chunks(w_ceil_bits, common_bits);
+        let (w_ceil_leading_bits, w_ceil_leading_decompose) =
+            Self::bits_to_leading_bits_and_decompose(w_ceil_bits, common_bits);
 
         let n_max = field_to_bn(&-N::one());
         let n_floor_bits = n_max.bits() - 1;
         assert!(BigUint::from(1u64) << n_floor_bits < n_max);
         assert!(BigUint::from(1u64) << (n_floor_bits + 1) >= n_max);
-        let (n_floor_leading_bits, n_floor_leading_chunks) =
-            Self::bits_to_leading_bits_and_chunks(n_floor_bits, common_bits);
+        let (n_floor_leading_bits, n_floor_leading_decompose) =
+            Self::bits_to_leading_bits_and_decompose(n_floor_bits, common_bits);
 
         let d_bits = Self::d_bits(overflow_bits);
-        let (d_leading_bits, d_leading_chunks) =
-            Self::bits_to_leading_bits_and_chunks(d_bits, common_bits);
+        let (d_leading_bits, d_leading_decompose) =
+            Self::bits_to_leading_bits_and_decompose(d_bits, common_bits);
 
-        let limb_bits = common_bits * MAX_CHUNKS;
+        let limb_bits = common_bits * RANGE_VALUE_DECOMPOSE;
         let limbs = (w_ceil_bits + limb_bits - 1) / limb_bits;
 
         let max_d = BigUint::from(1u64) << d_bits;
@@ -129,9 +137,9 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
 
             limbs,
             limb_bits,
-            w_ceil_leading_chunks,
-            n_floor_leading_chunks,
-            d_leading_chunks,
+            w_ceil_leading_decompose,
+            n_floor_leading_decompose,
+            d_leading_decompose,
 
             overflow_bits,
             overflow_limit,

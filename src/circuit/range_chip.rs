@@ -1,17 +1,29 @@
-use crate::{assign::AssignedValue, context::IntegerContext, range_info::*, utils::bn_to_field};
+use crate::assign::AssignedValue;
+use crate::context::IntegerContext;
+use crate::range_info::*;
+use crate::utils::bn_to_field;
 
-use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
-    circuit::Layouter,
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, TableColumn},
-    poly::Rotation,
-};
+use halo2_proofs::arithmetic::BaseExt;
+use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::circuit::Layouter;
+use halo2_proofs::plonk::Advice;
+use halo2_proofs::plonk::Column;
+use halo2_proofs::plonk::ConstraintSystem;
+use halo2_proofs::plonk::Error;
+use halo2_proofs::plonk::Expression;
+use halo2_proofs::plonk::Fixed;
+use halo2_proofs::plonk::TableColumn;
+use halo2_proofs::poly::Rotation;
 use num_bigint::BigUint;
-use std::{marker::PhantomData, sync::Arc, vec};
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::vec;
 
-pub const MAX_CHUNKS: u64 = 6;
+pub const MAX_CHUNKS: u64 = 3;
 pub const MAX_BITS: u64 = 18;
 pub const COMMON_RANGE_BITS: u64 = MAX_BITS as u64;
+pub const VALUE_COLUMNS: usize = 2;
+pub const RANGE_VALUE_DECOMPOSE: u64 = MAX_CHUNKS * VALUE_COLUMNS as u64;
 
 const CLASS_SHIFT_BITS: usize = 128;
 
@@ -21,7 +33,7 @@ pub struct RangeChipConfig {
     pub tag_range_table_column: TableColumn,
     pub block_first: Column<Fixed>,
     pub range_class: Column<Fixed>,
-    pub value: Column<Advice>,
+    pub values: [Column<Advice>; VALUE_COLUMNS],
 }
 
 pub struct RangeChip<N: FieldExt> {
@@ -38,50 +50,62 @@ impl<N: FieldExt> RangeChip<N> {
     }
 
     pub fn configure(meta: &mut ConstraintSystem<N>) -> RangeChipConfig {
+        assert!(VALUE_COLUMNS > 1);
+
         let block_first = meta.fixed_column();
         let range_class = meta.fixed_column();
         let tag_range_table_column = meta.lookup_table_column();
         let max_range_table_column = meta.lookup_table_column();
-        let value = meta.advice_column();
+        let values = [(); VALUE_COLUMNS].map(|_| meta.advice_column());
 
-        meta.enable_equality(value);
+        meta.enable_equality(values[0]);
 
         meta.lookup("tag range check", |meta| {
             let class = meta.query_fixed(range_class, Rotation::cur());
-            let is_block_first = meta.query_fixed(block_first, Rotation::cur());
-            let v = meta.query_advice(value, Rotation::cur());
+            let v = meta.query_advice(values[VALUE_COLUMNS - 1], Rotation::cur());
 
             let class_shift = bn_to_field::<N>(&(BigUint::from(1u64) << CLASS_SHIFT_BITS));
+
             vec![(
-                (class * Expression::Constant(class_shift) + v)
-                    * (Expression::Constant(N::one()) - is_block_first),
+                (class * Expression::Constant(class_shift) + v),
                 tag_range_table_column,
             )]
         });
 
-        meta.lookup("max range check", |meta| {
-            let is_block_first = meta.query_fixed(block_first, Rotation::cur());
-            let v = meta.query_advice(value, Rotation::cur());
+        for col in 0..VALUE_COLUMNS {
+            meta.lookup("max range check", |meta| {
+                let is_block_first = meta.query_fixed(block_first, Rotation::cur());
+                let v = meta.query_advice(values[col], Rotation::cur());
 
-            vec![(
-                v * (Expression::Constant(N::one()) - is_block_first),
-                max_range_table_column,
-            )]
-        });
+                let lookup_expr = if col == 0 {
+                    v * (Expression::Constant(N::one()) - is_block_first)
+                } else {
+                    v
+                };
+
+                vec![(lookup_expr, max_range_table_column)]
+            });
+        }
 
         meta.create_gate("block first sum", |meta| {
             let is_block_first = meta.query_fixed(block_first, Rotation::cur());
             let shift_unit = bn_to_field::<N>(&(BigUint::from(1u64) << COMMON_RANGE_BITS));
             let mut shift_acc = N::one();
 
-            let mut acc = meta.query_advice(value, Rotation(1));
-            for i in 1..MAX_CHUNKS as i32 {
-                let c = meta.query_advice(value, Rotation(i + 1));
-                shift_acc = shift_acc * &shift_unit;
-                acc = acc + c * Expression::Constant(shift_acc);
+            let mut acc = None;
+            for col in 0..VALUE_COLUMNS {
+                for row in 0..MAX_CHUNKS as i32 {
+                    let c = meta.query_advice(values[col], Rotation(row + 1));
+                    if let Some(_acc) = acc {
+                        acc = Some(_acc + c * Expression::Constant(shift_acc))
+                    } else {
+                        acc = Some(c * Expression::Constant(shift_acc))
+                    }
+                    shift_acc = shift_acc * &shift_unit;
+                }
             }
 
-            vec![is_block_first * (acc - meta.query_advice(value, Rotation::cur()))]
+            vec![is_block_first * (acc.unwrap() - meta.query_advice(values[0], Rotation::cur()))]
         });
 
         RangeChipConfig {
@@ -89,7 +113,7 @@ impl<N: FieldExt> RangeChip<N> {
             tag_range_table_column,
             block_first,
             range_class,
-            value,
+            values,
         }
     }
 
@@ -148,16 +172,16 @@ pub trait RangeChipOps<W: BaseExt, N: FieldExt> {
     fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
 }
 
-fn decompose_bn<N: FieldExt>(bn: &BigUint, n: u64, mask: &BigUint) -> (N, Vec<N>) {
+fn decompose_bn<N: FieldExt>(bn: &BigUint, decompose: u64, mask: &BigUint) -> (N, Vec<N>) {
     let v = bn_to_field::<N>(bn);
-    let mut chunks = vec![];
+    let mut decompose_v = vec![];
 
-    for i in 0..n {
+    for i in 0..decompose {
         let val = (bn >> (i * COMMON_RANGE_BITS)) & mask;
-        chunks.push(bn_to_field::<N>(&val));
+        decompose_v.push(bn_to_field::<N>(&val));
     }
 
-    (v, chunks)
+    (v, decompose_v)
 }
 
 impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
@@ -178,7 +202,11 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
     }
 
     fn assign_nonleading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
-        let v = decompose_bn(bn, MAX_CHUNKS, &self.info().common_range_mask);
+        let v = decompose_bn(
+            bn,
+            MAX_CHUNKS * VALUE_COLUMNS as u64,
+            &self.info().common_range_mask,
+        );
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
         let res =
@@ -191,7 +219,7 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
         let info = self.info();
         let v = decompose_bn(
             bn,
-            self.info().w_ceil_leading_chunks,
+            self.info().w_ceil_leading_decompose,
             &info.common_range_mask,
         );
         let records_mtx = self.ctx.borrow().records.clone();
@@ -209,7 +237,7 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
         let info = self.info();
         let v = decompose_bn(
             bn,
-            self.info().n_floor_leading_chunks,
+            self.info().n_floor_leading_decompose,
             &info.common_range_mask,
         );
         let records_mtx = self.ctx.borrow().records.clone();
@@ -225,7 +253,7 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
 
     fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
         let info = self.info();
-        let v = decompose_bn(bn, self.info().d_leading_chunks, &info.common_range_mask);
+        let v = decompose_bn(bn, self.info().d_leading_decompose, &info.common_range_mask);
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
         let res =
