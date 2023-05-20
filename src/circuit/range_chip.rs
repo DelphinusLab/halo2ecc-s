@@ -62,12 +62,14 @@ impl<N: FieldExt> RangeChip<N> {
 
         meta.lookup("tag range check", |meta| {
             let class = meta.query_fixed(range_class, Rotation::cur());
-            let v = meta.query_advice(values[VALUE_COLUMNS - 1], Rotation::cur());
+            let is_block_first = meta.query_fixed(block_first, Rotation::cur());
+            let v = meta.query_advice(values[0], Rotation::cur());
 
             let class_shift = bn_to_field::<N>(&(BigUint::from(1u64) << CLASS_SHIFT_BITS));
 
             vec![(
-                (class * Expression::Constant(class_shift) + v),
+                (class * Expression::Constant(class_shift) + v)
+                    * (Expression::Constant(N::one()) - is_block_first),
                 tag_range_table_column,
             )]
         });
@@ -93,7 +95,7 @@ impl<N: FieldExt> RangeChip<N> {
             let mut shift_acc = N::one();
 
             let mut acc = None;
-            for col in 0..VALUE_COLUMNS {
+            for col in (0..VALUE_COLUMNS).rev() {
                 for row in 0..MAX_CHUNKS as i32 {
                     let c = meta.query_advice(values[col], Rotation(row + 1));
                     if let Some(_acc) = acc {

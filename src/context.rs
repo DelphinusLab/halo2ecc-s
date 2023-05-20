@@ -514,9 +514,9 @@ impl<N: FieldExt> Records<N> {
         self.ensure_range_record_size(offset + 1);
 
         self.range_fix_record[offset][1] = Some(N::from(leading_bits));
-        self.range_adv_record[offset][VALUE_COLUMNS - 1].0 = Some(v);
+        self.range_adv_record[offset][0].0 = Some(v);
 
-        AssignedValue::new(Chip::RangeChip, VALUE_COLUMNS - 1, offset, v)
+        AssignedValue::new(Chip::RangeChip, 0, offset, v)
     }
 
     pub fn assign_cache_value(&mut self, offset: usize, v: &AssignedValue<N>, encode: N) {
@@ -589,10 +589,10 @@ impl<N: FieldExt> Records<N> {
         self.range_fix_record[offset + MAX_CHUNKS as usize][0] = Some(N::zero());
 
         for (index, v) in decompose_v.iter().enumerate() {
-            let col = index / MAX_CHUNKS as usize;
+            let col = VALUE_COLUMNS - 1 - index / MAX_CHUNKS as usize;
             let row_offset = index % MAX_CHUNKS as usize;
 
-            if col == VALUE_COLUMNS - 1 {
+            if col == 0 {
                 self.range_fix_record[offset + 1 + row_offset][1] =
                     if index != decompose_v.len() - 1 {
                         Some(N::from(COMMON_RANGE_BITS as u64))
