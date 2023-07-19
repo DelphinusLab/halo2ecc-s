@@ -371,7 +371,10 @@ impl<N: FieldExt> Records<N> {
         range_chip: &RangeChip<N>,
         select_chip: &SelectChip<N>,
     ) -> Result<Option<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>>, Error> {
-        let max_row = usize::max(self.base_height, self.range_height);
+        let max_row = self
+            .base_height
+            .max(self.range_height)
+            .max(self.select_height);
         let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
         if !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
