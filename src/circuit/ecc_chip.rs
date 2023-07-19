@@ -237,7 +237,8 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         let mut carry = rand_acc_point_neg.clone();
 
         for wi in 0..bits[0].len() {
-            let mut inner_acc = None;
+            acc = self.ecc_double_unsafe(&acc);
+
             for group_index in 0..groups.len() {
                 let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
                 let (index_cell, ci) =
@@ -245,21 +246,13 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
                 let ci =
                     self.assign_selected_point_unsafe(&ci, &index_cell, group_index + group_prefix);
 
-                match inner_acc {
-                    None => inner_acc = Some(ci),
-                    Some(_inner_acc) => {
-                        let p = self.ecc_add_unsafe(&ci, &_inner_acc);
-                        inner_acc = Some(p);
-                    }
-                }
+                acc = self.ecc_add_unsafe(&ci, &acc);
             }
 
             if groups.len().is_odd() {
-                inner_acc = Some(self.ecc_add_unsafe(&inner_acc.unwrap(), &rand_line_point_neg));
+                acc = self.ecc_add_unsafe(&acc, &rand_line_point_neg);
             }
 
-            acc = self.ecc_double_unsafe(&acc);
-            acc = self.ecc_add_unsafe(&acc, &inner_acc.unwrap());
             carry = self.ecc_double_unsafe(&carry);
         }
 
