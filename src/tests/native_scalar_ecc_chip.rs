@@ -47,3 +47,47 @@ fn test_native_ecc_chip() {
 
     run_circuit_on_bn256(ctx.into(), 22);
 }
+
+#[test]
+fn test_native_ecc_unsafe_chip() {
+    let ctx = Rc::new(RefCell::new(Context::new()));
+    let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
+    let mut ctx = NativeScalarEccContext::<G1Affine>(ctx, 0);
+
+    let mut points = vec![];
+    let mut scalars = vec![];
+    let mut acc = G1::identity();
+
+    for _ in 0..100 {
+        let a = random_fr();
+        let b = random_fr();
+        let p = G1::generator() * a;
+        acc = acc + p * b;
+        points.push(p);
+        scalars.push(b);
+    }
+
+    let timer = start_timer!(|| "setup");
+
+    let points = points
+        .iter()
+        .map(|x| ctx.assign_nonzero_point(x))
+        .collect::<Vec<_>>();
+    let scalars = scalars
+        .into_iter()
+        .map(|x| ctx.0.ctx.borrow_mut().assign(x))
+        .collect::<Vec<_>>();
+
+    let res = ctx.msm_batch_on_group_unsafe(
+        &points,
+        &scalars,
+        G1::generator() * random_fr(),
+        G1::generator() * random_fr(),
+    );
+    let res_expect = ctx.assign_nonzero_point(&acc);
+    ctx.ecc_assert_equal_unsafe(&res, &res_expect);
+
+    end_timer!(timer);
+
+    run_circuit_on_bn256(ctx.into(), 22);
+}

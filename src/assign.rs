@@ -50,6 +50,12 @@ pub struct AssignedPoint<C: CurveAffine, N: FieldExt> {
 }
 
 #[derive(Clone, Debug)]
+pub struct AssignedNonZeroPoint<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedInteger<C::Base, N>,
+    pub y: AssignedInteger<C::Base, N>,
+}
+
+#[derive(Clone, Debug)]
 pub struct AssignedPointWithCurvature<C: CurveAffine, N: FieldExt> {
     pub x: AssignedInteger<C::Base, N>,
     pub y: AssignedInteger<C::Base, N>,
@@ -94,6 +100,12 @@ impl<C: CurveAffine, N: FieldExt> AssignedPoint<C, N> {
         z: AssignedCondition<N>,
     ) -> Self {
         Self { x, y, z }
+    }
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedNonZeroPoint<C, N> {
+    pub fn new(x: AssignedInteger<C::Base, N>, y: AssignedInteger<C::Base, N>) -> Self {
+        Self { x, y }
     }
 }
 

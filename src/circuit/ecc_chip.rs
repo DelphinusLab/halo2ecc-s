@@ -5,9 +5,11 @@ use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::pairing::group::Curve;
 use halo2_proofs::pairing::group::Group;
 use num_bigint::BigUint;
+use num_integer::Integer;
 
 use super::integer_chip::IntegerChipOps;
 use super::select_chip::SelectChipOps;
+use crate::assign::AssignedNonZeroPoint;
 use crate::assign::{AssignedCondition, AssignedCurvature, AssignedInteger, AssignedPoint};
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::utils::{bn_to_field, field_to_bn};
@@ -180,6 +182,90 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         acc.unwrap()
     }
 
+    fn msm_batch_on_group_unsafe(
+        &mut self,
+        points: &Vec<AssignedNonZeroPoint<C, N>>,
+        scalars: &Vec<Self::AssignedScalar>,
+        rand_acc_point: C::Curve,
+        rand_line_point: C::Curve,
+    ) -> AssignedNonZeroPoint<C, N> {
+        assert!(points.len() <= MSM_PREFIX_SIZE);
+        let rand_acc_point = self.assign_nonzero_point(&rand_acc_point);
+        let rand_line_point = self.assign_nonzero_point(&rand_line_point);
+
+        let rand_acc_point_neg = self.ecc_neg_unsafe(&rand_acc_point);
+        let rand_line_point_neg = self.ecc_neg_unsafe(&rand_line_point);
+
+        let best_group_size = 5;
+        let n_group = (points.len() + best_group_size - 1) / best_group_size;
+        let group_size = (points.len() + n_group - 1) / n_group;
+
+        let mut candidates = vec![];
+        let group_prefix = self.get_and_increase_msm_prefix();
+        let mut group_index = group_prefix;
+
+        for (i, chunk) in points.chunks(group_size).enumerate() {
+            let init = if i.is_even() {
+                &rand_line_point
+            } else {
+                &rand_line_point_neg
+            };
+
+            candidates.push(vec![init.clone()]);
+            self.assign_cache_point_unsafe(&init, group_index, 0 as usize);
+
+            let cl = candidates.last_mut().unwrap();
+            for i in 1..1u32 << chunk.len() {
+                let pos = 32 - i.leading_zeros() - 1;
+                let other = i - (1 << pos);
+                let p = self.ecc_add_unsafe(&cl[other as usize], &chunk[pos as usize]);
+                let p = self.ecc_reduce_unsafe(&p);
+                self.assign_cache_point_unsafe(&p, group_index, i as usize);
+                cl.push(p);
+            }
+            group_index += 1;
+        }
+
+        let bits = scalars
+            .into_iter()
+            .map(|s| self.decompose_scalar::<1>(s))
+            .collect::<Vec<Vec<[AssignedCondition<_>; 1]>>>();
+
+        let groups = bits.chunks(group_size).collect::<Vec<_>>();
+
+        let mut acc = rand_acc_point.clone();
+        let mut carry = rand_acc_point_neg.clone();
+
+        for wi in 0..bits[0].len() {
+            let mut inner_acc = None;
+            for group_index in 0..groups.len() {
+                let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
+                let (index_cell, ci) =
+                    self.pick_candidate_unsafe(&candidates[group_index], &group_bits);
+                let ci =
+                    self.assign_selected_point_unsafe(&ci, &index_cell, group_index + group_prefix);
+
+                match inner_acc {
+                    None => inner_acc = Some(ci),
+                    Some(_inner_acc) => {
+                        let p = self.ecc_add_unsafe(&ci, &_inner_acc);
+                        inner_acc = Some(p);
+                    }
+                }
+            }
+
+            if groups.len().is_odd() {
+                inner_acc = Some(self.ecc_add_unsafe(&inner_acc.unwrap(), &rand_line_point_neg));
+            }
+
+            acc = self.ecc_double_unsafe(&acc);
+            acc = self.ecc_add_unsafe(&acc, &inner_acc.unwrap());
+            carry = self.ecc_double_unsafe(&carry);
+        }
+
+        self.ecc_add_unsafe(&acc, &carry)
+    }
+
     fn msm(
         &mut self,
         points: &Vec<AssignedPoint<C, N>>,
@@ -251,6 +337,31 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
             .assert_true(&eq_or_identity);
 
         AssignedPoint::new(x, y, z)
+    }
+
+    fn assign_nonzero_point(
+        &mut self,
+        c: &<C as CurveAffine>::CurveExt,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let coordinates = c.to_affine().coordinates();
+        let t: Option<_> = coordinates.map(|v| (v.x().clone(), v.y().clone())).into();
+        let (x, y) = t.unwrap();
+        let is_identity: bool = c.is_identity().into();
+        assert!(!is_identity);
+
+        let x = self.base_integer_chip().assign_w(&field_to_bn(&x));
+        let y = self.base_integer_chip().assign_w(&field_to_bn(&y));
+
+        // Constrain y^2 = x^3 + b
+        // TODO: Optimize b
+        let b = self.base_integer_chip().assign_int_constant(C::b());
+        let y2 = self.base_integer_chip().int_square(&y);
+        let x2 = self.base_integer_chip().int_square(&x);
+        let x3 = self.base_integer_chip().int_mul(&x2, &x);
+        let right = self.base_integer_chip().int_add(&x3, &b);
+
+        self.base_integer_chip().assert_int_equal(&y2, &right);
+        AssignedNonZeroPoint::new(x, y)
     }
 
     fn assign_identity(&mut self) -> AssignedPointWithCurvature<C, N> {
@@ -573,5 +684,125 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         //println!("index is: {:?}, cell is: {:?}", index, index_cell.val);
         let ci = &curr_candidates[index];
         (index_cell, ci.clone())
+    }
+
+    fn lambda_to_point_unsafe(
+        &mut self,
+        lambda: &AssignedInteger<C::Base, N>,
+        a: &AssignedNonZeroPoint<C, N>,
+        b: &AssignedNonZeroPoint<C, N>,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let l = lambda;
+
+        // cx = lambda ^ 2 - a.x - b.x
+        let cx = {
+            let l_square = self.base_integer_chip().int_square(l);
+            let t = self.base_integer_chip().int_sub(&l_square, &a.x);
+            let t = self.base_integer_chip().int_sub(&t, &b.x);
+            t
+        };
+
+        let cy = {
+            let t = self.base_integer_chip().int_sub(&a.x, &cx);
+            let t = self.base_integer_chip().int_mul(&t, l);
+            let t = self.base_integer_chip().int_sub(&t, &a.y);
+            t
+        };
+
+        AssignedNonZeroPoint::new(cx, cy)
+    }
+
+    fn ecc_add_unsafe(
+        &mut self,
+        a: &AssignedNonZeroPoint<C, N>,
+        b: &AssignedNonZeroPoint<C, N>,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let diff_x = self.base_integer_chip().int_sub(&a.x, &b.x);
+        let diff_y = self.base_integer_chip().int_sub(&a.y, &b.y);
+        let (x_eq, tangent) = self.base_integer_chip().int_div(&diff_y, &diff_x);
+
+        // x cannot be same
+        self.base_integer_chip().base_chip().assert_false(&x_eq);
+
+        self.lambda_to_point_unsafe(&tangent, a, b)
+    }
+
+    fn ecc_double_unsafe(&mut self, a: &AssignedNonZeroPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
+        // 3 * x ^ 2 / 2 * y
+        let x_square = self.base_integer_chip().int_square(&a.x);
+        let numerator = self
+            .base_integer_chip()
+            .int_mul_small_constant(&x_square, 3);
+        let denominator = self.base_integer_chip().int_mul_small_constant(&a.y, 2);
+
+        let (z, v) = self.base_integer_chip().int_div(&numerator, &denominator);
+
+        // This line is unnecessary, but keep it for security.
+        self.base_integer_chip().base_chip().assert_false(&z);
+
+        self.lambda_to_point_unsafe(&v, &a, &a)
+    }
+
+    fn ecc_neg_unsafe(&mut self, a: &AssignedNonZeroPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
+        let x = a.x.clone();
+        let y = self.base_integer_chip().int_neg(&a.y);
+
+        AssignedNonZeroPoint::new(x, y)
+    }
+
+    fn ecc_reduce_unsafe(&mut self, a: &AssignedNonZeroPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
+        let x = self.base_integer_chip().reduce(&a.x);
+        let y = self.base_integer_chip().reduce(&a.y);
+
+        AssignedNonZeroPoint::new(x, y)
+    }
+
+    fn pick_candidate_unsafe(
+        &mut self,
+        candidates: &Vec<AssignedNonZeroPoint<C, N>>,
+        group_bits: &Vec<AssignedCondition<N>>,
+    ) -> (AssignedValue<N>, AssignedNonZeroPoint<C, N>) {
+        let curr_candidates: Vec<_> = candidates.clone();
+        let index_vec = group_bits
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (&x.0, N::from(1u64 << i)))
+            .collect();
+
+        let mut base_chip = self.base_integer_chip().base_chip();
+        let index = base_chip.sum_with_constant(index_vec, None);
+        let index_i = (index.val.to_repr().as_ref())[0] as usize;
+
+        let ci = &curr_candidates[index_i];
+        (index, ci.clone())
+    }
+
+    fn assign_selected_point_unsafe(
+        &mut self,
+        p: &AssignedNonZeroPoint<C, N>,
+        sc: &AssignedValue<N>,
+        g: usize,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let mut i = 0;
+        let x = self.assign_selected_integer(&p.x, sc, g, &mut i);
+        let y = self.assign_selected_integer(&p.y, sc, g, &mut i);
+
+        // skip checking x y relation cause they are selected from well formed values
+        AssignedNonZeroPoint { x, y }
+    }
+
+    fn assign_cache_point_unsafe(&mut self, p: &AssignedNonZeroPoint<C, N>, g: usize, sc: usize) {
+        let mut i = 0;
+        self.assign_cache_integer(&p.x, sc, g, &mut i);
+        self.assign_cache_integer(&p.y, sc, g, &mut i);
+    }
+
+    fn ecc_assert_equal_unsafe(
+        &mut self,
+        a: &AssignedNonZeroPoint<C, N>,
+        b: &AssignedNonZeroPoint<C, N>,
+    ) {
+        self.base_integer_chip().assert_int_equal(&a.x, &b.x);
+        self.base_integer_chip().assert_int_equal(&a.y, &b.y);
     }
 }
