@@ -271,11 +271,14 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         points: &Vec<AssignedPoint<C, N>>,
         scalars: &Vec<Self::AssignedScalar>,
     ) -> AssignedPoint<C, N> {
-        if points.len() >= 3 {
-            self.msm_batch_on_group(points, scalars)
-        } else {
-            self.msm_batch_on_window(points, scalars)
+        let r1 = C::generator() * C::Scalar::rand();
+        let r2 = C::generator() * C::Scalar::rand();
+        let mut nonzero_points = vec![];
+        for p in points {
+            nonzero_points.push(self.ecc_assert_nonzero_point(p));
         }
+        let p = self.msm_batch_on_group_unsafe(&nonzero_points, scalars, r1, r2);
+        self.ecc_nonzero_point_downgrade(&p)
     }
 
     fn ecc_mul(&mut self, a: &AssignedPoint<C, N>, s: Self::AssignedScalar) -> AssignedPoint<C, N> {
@@ -804,5 +807,28 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
     ) {
         self.base_integer_chip().assert_int_equal(&a.x, &b.x);
         self.base_integer_chip().assert_int_equal(&a.y, &b.y);
+    }
+
+    fn ecc_assert_nonzero_point(&mut self, a: &AssignedPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
+        self.base_integer_chip().base_chip().assert_false(&a.z);
+        AssignedNonZeroPoint {
+            x: a.x.clone(),
+            y: a.y.clone(),
+        }
+    }
+
+    fn ecc_nonzero_point_downgrade(
+        &mut self,
+        a: &AssignedNonZeroPoint<C, N>,
+    ) -> AssignedPoint<C, N> {
+        let zero = self
+            .base_integer_chip()
+            .base_chip()
+            .assign_constant(N::zero());
+        AssignedPoint {
+            x: a.x.clone(),
+            y: a.y.clone(),
+            z: AssignedCondition(zero),
+        }
     }
 }
