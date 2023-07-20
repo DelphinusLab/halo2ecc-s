@@ -26,12 +26,52 @@ pub const COMMON_RANGE_BITS: u64 = MAX_BITS as u64;
 pub const RANGE_CHIP_RANGE_COLUMNS: usize = 2;
 pub const RANGE_CHIP_COMMON_RANGE_COLUMNS: usize = RANGE_CHIP_RANGE_COLUMNS - 1;
 pub const RANGE_CHIP_ADV_COLUMNS: usize = RANGE_CHIP_RANGE_COLUMNS + 1;
-pub const RANGE_CHIP_FIX_COLUMNS: usize = 2;
+pub const RANGE_CHIP_FIX_COLUMNS: usize = 3;
 
 pub const RANGE_VALUE_DECOMPOSE: u64 = MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS as u64;
 pub const RANGE_VALUE_DECOMPOSE_COMMON_PARTS: u64 =
     MAX_CHUNKS * RANGE_CHIP_COMMON_RANGE_COLUMNS as u64;
 
+/*
+ *  Range chip is used to assigned range constrained cell.
+ *
+ *  | short acc sel (fixed) | full acc sel (fixed) | acc value | tag (fixed) | tagged range | common range |
+ *  |    is_short_acc       |     is_full_acc      |    acc    |     tag3    |      v3      |      v0      |
+ *  |                       |                      |           |     tag4    |      v4      |      v1      |
+ *  |                       |                      |           |     tag5    |      v5      |      v2      |
+ *
+ *  lookup constraints:
+ *  v0, v1, v2 is in range (0..common_range)
+ *  guaranteed by lookup constraint: (COMMON_RANGE_BITS, col(common range)) in (range_tag_table_column, range_value_table_column)
+ *
+ *  v3 is in range (0 .. 1 << tag3), v4 is in range (0 .. 1 << tag4), v5 is in range (0 .. 1 << tag5),
+ *  guaranteed by lookup constraint: (col(tag), col(tagged range)) in (range_tag_table_column, range_value_table_column)
+ *
+ *  (range_tag_table_column, range_value_table_column) contains:
+ *  (0, 0)
+ *  (1, 0), (1, 1)
+ *  (2, 0), (2, 1), (2, 2), (2, 3)
+ *  ...
+ *  (COMMON_RANGE_BITS, 0), (COMMON_RANGE_BITS, 1), ..., (COMMON_RANGE_BITS, (1 << COMMON_RANGE_BITS) - 1)
+ *
+ *  accumulate constraints:
+ *  (short accumulate mode works only on tagged range col)
+ *  is_short_acc = 1 -> acc = v3 + v4 * common_range + v5 * common_range ^ 2
+ *
+ *  (full accumulate mode works on all range col)
+ *  is_full_acc  = 1 -> acc = v0 + v1 * common_range + v2 * common_range ^ 2 + v3 * common_range ^ 3 + v4 * common_range ^ 4 + v5 * common_range ^ 5
+ *
+ *  To constraint a in max_a_bits:
+ *  If max_a_bits <= COMMON_RANGE_BITS, allocate one row with (tag = max_a_bits, tag_value = a)
+ *  If max_a_bits > COMMON_RANGE_BITS, allocate MAX_CHUNKS rows with accumulate mode.
+ *
+ *  short accumulate mode allows bits in
+ *     max_a_bits <= MAX_CHUNKS * COMMON_RANGE_BITS]
+ *  
+ *  full accumulate mode allows bits in
+ *     max_a_bits >= MAX_CHUNKS * RANGE_CHIP_COMMON_RANGE_COLUMNS * COMMON_RANGE_BITS
+ *  && max_a_bits <= MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS * COMMON_RANGE_BITS
+ */
 #[derive(Clone, Debug)]
 pub struct RangeChipConfig {
     pub range_tag_table_column: TableColumn,
@@ -53,8 +93,9 @@ pub enum RangeAdvColIndex {
 }
 
 pub enum RangeFixColIndex {
-    ValueAccSelCol = 0,
-    TagCol = 1,
+    FullValueAccSelCol = 0,
+    ShortValueAccSelCol = 1,
+    TagCol = 2,
 }
 
 impl<N: FieldExt> RangeChip<N> {
@@ -74,7 +115,8 @@ impl<N: FieldExt> RangeChip<N> {
         let range_value_table_column = meta.lookup_table_column();
 
         let tag = fix_cols[RangeFixColIndex::TagCol as usize];
-        let value_acc_sel = fix_cols[RangeFixColIndex::ValueAccSelCol as usize];
+        let full_value_acc_sel = fix_cols[RangeFixColIndex::FullValueAccSelCol as usize];
+        let short_value_acc_sel = fix_cols[RangeFixColIndex::ShortValueAccSelCol as usize];
 
         let value_acc = adv_cols[RangeAdvColIndex::ValueAccCol as usize];
         let tagged_range_col = adv_cols[RangeAdvColIndex::TaggedRangeCol as usize];
@@ -106,8 +148,8 @@ impl<N: FieldExt> RangeChip<N> {
             });
         }
 
-        meta.create_gate("value acc check", |meta| {
-            let value_acc_sel = meta.query_fixed(value_acc_sel, Rotation::cur());
+        meta.create_gate("full value acc check", |meta| {
+            let value_acc_sel = meta.query_fixed(full_value_acc_sel, Rotation::cur());
             let value_acc = meta.query_advice(value_acc, Rotation::cur());
             let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);
 
@@ -126,6 +168,29 @@ impl<N: FieldExt> RangeChip<N> {
                     } else {
                         acc = Some((c, shift_unit))
                     }
+                }
+            }
+
+            vec![value_acc_sel * (acc.unwrap().0 - value_acc)]
+        });
+
+        meta.create_gate("short value acc check", |meta| {
+            let value_acc_sel = meta.query_fixed(short_value_acc_sel, Rotation::cur());
+            let value_acc = meta.query_advice(value_acc, Rotation::cur());
+            let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);
+
+            let mut acc = None;
+            let col = &tagged_range_col;
+
+            for row in 0..MAX_CHUNKS as i32 {
+                let c = meta.query_advice(*col, Rotation(row));
+                if let Some((value_acc, shift_acc)) = acc {
+                    acc = Some((
+                        value_acc + c * Expression::Constant(shift_acc),
+                        shift_acc * &shift_unit,
+                    ))
+                } else {
+                    acc = Some((c, shift_unit))
                 }
             }
 

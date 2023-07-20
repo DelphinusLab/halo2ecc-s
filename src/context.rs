@@ -374,10 +374,6 @@ impl<N: FieldExt> Records<N> {
             .max(self.range_height)
             .max(self.select_height);
         let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
-        println!(
-            "row is base: {}, range: {}, select: {}",
-            self.base_height, self.range_height, self.select_height
-        );
         if !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
             let range_cells = self._assign_to_range_chip(region, range_chip)?;
@@ -585,7 +581,7 @@ impl<N: FieldExt> Records<N> {
         )
     }
 
-    pub fn assign_acc_range_value(
+    fn assign_full_acc_range_value(
         &mut self,
         offset: usize,
         (v, decompose_v): (N, Vec<N>),
@@ -599,11 +595,9 @@ impl<N: FieldExt> Records<N> {
 
         self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
 
-        self.range_fix_record[offset][RangeFixColIndex::ValueAccSelCol as usize] = Some(N::one());
+        self.range_fix_record[offset][RangeFixColIndex::FullValueAccSelCol as usize] =
+            Some(N::one());
         self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
-
-        // TODO: A row placeholder, I think it can be removed now
-        self.range_fix_record[offset + MAX_CHUNKS as usize - 1][0] = Some(N::zero());
 
         for (index, v) in decompose_v.iter().enumerate() {
             let col_index_raw = index / MAX_CHUNKS as usize;
@@ -630,5 +624,63 @@ impl<N: FieldExt> Records<N> {
             offset,
             v,
         )
+    }
+
+    fn assign_short_acc_range_value(
+        &mut self,
+        offset: usize,
+        (v, decompose_v): (N, Vec<N>),
+        leading_bits: u64,
+    ) -> AssignedValue<N> {
+        assert!(decompose_v.len() as u64 <= MAX_CHUNKS);
+
+        self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
+
+        self.range_fix_record[offset][RangeFixColIndex::ShortValueAccSelCol as usize] =
+            Some(N::one());
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
+
+        for (index, v) in decompose_v.iter().enumerate() {
+            self.range_fix_record[offset + index][RangeFixColIndex::TagCol as usize] =
+                if index != decompose_v.len() - 1 {
+                    Some(N::from(COMMON_RANGE_BITS as u64))
+                } else {
+                    Some(N::from(leading_bits))
+                };
+
+            self.range_adv_record[offset + index][RangeAdvColIndex::TaggedRangeCol as usize].0 =
+                Some(*v);
+        }
+
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::ValueAccCol as usize,
+            offset,
+            v,
+        )
+    }
+
+    pub fn assign_acc_range_value(
+        &mut self,
+        offset: usize,
+        (v, decompose_v): (N, Vec<N>),
+        leading_bits: u64,
+    ) -> AssignedValue<N> {
+        assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
+        if (leading_bits == COMMON_RANGE_BITS
+            && decompose_v.len() == RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize)
+            || decompose_v.len() > RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize
+        {
+            self.assign_full_acc_range_value(offset, (v, decompose_v), leading_bits)
+        } else if decompose_v.len() <= MAX_CHUNKS as usize {
+            self.assign_short_acc_range_value(offset, (v, decompose_v), leading_bits)
+        } else {
+            eprintln!(
+                "attempt to assign unsupported range value, len: {}, leading bits: {}",
+                decompose_v.len(),
+                leading_bits
+            );
+            unreachable!()
+        }
     }
 }

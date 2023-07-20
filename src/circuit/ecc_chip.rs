@@ -264,14 +264,11 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         points: &Vec<AssignedPoint<C, N>>,
         scalars: &Vec<Self::AssignedScalar>,
     ) -> AssignedPoint<C, N> {
-        let r1 = C::generator() * C::Scalar::rand();
-        let r2 = C::generator() * C::Scalar::rand();
-        let mut nonzero_points = vec![];
-        for p in points {
-            nonzero_points.push(self.ecc_assert_nonzero_point(p));
+        if points.len() < 3 {
+            self.msm_batch_on_window(points, scalars)
+        } else {
+            self.msm_batch_on_group(points, scalars)
         }
-        let p = self.msm_batch_on_group_unsafe(&nonzero_points, scalars, r1, r2);
-        self.ecc_nonzero_point_downgrade(&p)
     }
 
     fn ecc_mul(&mut self, a: &AssignedPoint<C, N>, s: Self::AssignedScalar) -> AssignedPoint<C, N> {

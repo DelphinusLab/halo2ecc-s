@@ -45,7 +45,7 @@ fn test_native_ecc_chip() {
 
     end_timer!(timer);
 
-    run_circuit_on_bn256(ctx.into(), 22);
+    run_circuit_on_bn256(ctx.into(), 20);
 }
 
 #[test]
@@ -89,5 +89,5 @@ fn test_native_ecc_unsafe_chip() {
 
     end_timer!(timer);
 
-    run_circuit_on_bn256(ctx.into(), 22);
+    run_circuit_on_bn256(ctx.into(), 20);
 }
