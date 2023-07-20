@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
 use crate::circuit::range_chip::MAX_CHUNKS;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
-use crate::circuit::range_chip::VALUE_COLUMNS;
+use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
 use crate::utils::bn_to_field;
 use crate::utils::field_to_bn;
 
@@ -53,7 +53,8 @@ pub struct RangeInfo<W: BaseExt, N: FieldExt> {
 
 impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
     fn bits_to_leading_bits_and_decompose(bits: u64, common_bits: u64) -> (u64, u64) {
-        assert!(bits > (VALUE_COLUMNS as u64 - 1) * MAX_CHUNKS * common_bits);
+        // Ensure leading chunk is placed at tagged range column.
+        assert!(bits > RANGE_VALUE_DECOMPOSE_COMMON_PARTS * common_bits);
 
         let leading_chunk_bits = bits % common_bits;
         if leading_chunk_bits == 0 {

@@ -6,11 +6,16 @@ use crate::circuit::base_chip::BaseChip;
 use crate::circuit::base_chip::FIXED_COLUMNS;
 use crate::circuit::base_chip::MUL_COLUMNS;
 use crate::circuit::base_chip::VAR_COLUMNS;
+use crate::circuit::range_chip::RangeAdvColIndex;
 use crate::circuit::range_chip::RangeChip;
+use crate::circuit::range_chip::RangeFixColIndex;
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
 use crate::circuit::range_chip::MAX_CHUNKS;
+use crate::circuit::range_chip::RANGE_CHIP_ADV_COLUMNS;
+use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
-use crate::circuit::range_chip::VALUE_COLUMNS;
+use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
 use crate::circuit::select_chip::SelectChip;
 use crate::range_info::RangeInfo;
 use halo2_proofs::arithmetic::BaseExt;
@@ -128,9 +133,8 @@ pub struct Records<N: FieldExt> {
     pub base_fix_record: Vec<[Option<N>; FIXED_COLUMNS]>,
     pub base_height: usize,
 
-    pub range_adv_record: Vec<[(Option<N>, bool); VALUE_COLUMNS]>,
-    /* block_first selector and tag for last value column */
-    pub range_fix_record: Vec<[Option<N>; 2]>,
+    pub range_adv_record: Vec<[(Option<N>, bool); RANGE_CHIP_ADV_COLUMNS]>,
+    pub range_fix_record: Vec<[Option<N>; RANGE_CHIP_FIX_COLUMNS]>,
     pub range_height: usize,
 
     /* For picking point candidate from sum cache */
@@ -224,28 +228,22 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         range_chip: &RangeChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
-        let mut cells = vec![vec![None; self.range_height]];
+        let mut cells = vec![vec![None; self.range_height]; RANGE_CHIP_ADV_COLUMNS];
 
         for (row, fix) in self.range_fix_record.iter().enumerate() {
             if row >= self.range_height {
                 break;
             }
-            if fix[0].is_some() {
-                region.assign_fixed(
-                    || "range block first",
-                    range_chip.config.block_first,
-                    row,
-                    || Ok(fix[0].unwrap()),
-                )?;
-            }
 
-            if fix[1].is_some() {
-                region.assign_fixed(
-                    || "range class",
-                    range_chip.config.range_class,
-                    row,
-                    || Ok(fix[1].unwrap()),
-                )?;
+            for (col, fix) in fix.iter().enumerate() {
+                if let Some(v) = fix {
+                    region.assign_fixed(
+                        || "range fixed col",
+                        range_chip.config.fix_cols[col],
+                        row,
+                        || Ok(*v),
+                    )?;
+                }
             }
         }
 
@@ -255,12 +253,12 @@ impl<N: FieldExt> Records<N> {
             }
 
             for (col, adv) in adv.iter().enumerate() {
-                if adv.0.is_some() {
+                if let Some(v) = &adv.0 {
                     let cell = region.assign_advice(
-                        || "range var",
-                        range_chip.config.values[col],
+                        || "range adv col",
+                        range_chip.config.adv_cols[col],
                         row,
-                        || Ok(adv.0.unwrap()),
+                        || Ok(*v),
                     )?;
                     if adv.1 {
                         cells[col][row] = Some(cell);
@@ -376,6 +374,10 @@ impl<N: FieldExt> Records<N> {
             .max(self.range_height)
             .max(self.select_height);
         let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
+        println!(
+            "row is base: {}, range: {}, select: {}",
+            self.base_height, self.range_height, self.select_height
+        );
         if !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
             let range_cells = self._assign_to_range_chip(region, range_chip)?;
@@ -499,27 +501,14 @@ impl<N: FieldExt> Records<N> {
         if offset >= self.range_adv_record.len() {
             let to_len = (offset + EXTEND_SIZE) & !(EXTEND_SIZE - 1);
             self.range_adv_record
-                .resize(to_len, [(None, false); VALUE_COLUMNS]);
-            self.range_fix_record.resize(to_len, [None; 2]);
+                .resize(to_len, [(None, false); RANGE_CHIP_ADV_COLUMNS]);
+            self.range_fix_record
+                .resize(to_len, [None; RANGE_CHIP_FIX_COLUMNS]);
         }
 
         if offset >= self.range_height {
             self.range_height = offset + 1;
         }
-    }
-
-    pub fn assign_single_range_value(
-        &mut self,
-        offset: usize,
-        v: N,
-        leading_bits: u64,
-    ) -> AssignedValue<N> {
-        self.ensure_range_record_size(offset + 1);
-
-        self.range_fix_record[offset][1] = Some(N::from(leading_bits));
-        self.range_adv_record[offset][0].0 = Some(v);
-
-        AssignedValue::new(Chip::RangeChip, 0, offset, v)
     }
 
     pub fn assign_cache_value(&mut self, offset: usize, v: &AssignedValue<N>, encode: N) {
@@ -576,37 +565,70 @@ impl<N: FieldExt> Records<N> {
         AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
     }
 
-    pub fn assign_range_value(
+    pub fn assign_single_range_value(
+        &mut self,
+        offset: usize,
+        v: N,
+        leading_bits: u64,
+    ) -> AssignedValue<N> {
+        self.ensure_range_record_size(offset + 1);
+
+        self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] =
+            Some(N::from(leading_bits));
+        self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v);
+
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::TaggedRangeCol as usize,
+            offset,
+            v,
+        )
+    }
+
+    pub fn assign_acc_range_value(
         &mut self,
         offset: usize,
         (v, decompose_v): (N, Vec<N>),
         leading_bits: u64,
     ) -> AssignedValue<N> {
         assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
-        self.ensure_range_record_size(offset + 1 + MAX_CHUNKS as usize);
+        assert!(
+            decompose_v.len() as u64 > RANGE_VALUE_DECOMPOSE_COMMON_PARTS
+                || leading_bits == COMMON_RANGE_BITS
+        );
 
-        self.range_fix_record[offset][0] = Some(N::one());
-        self.range_adv_record[offset][0].0 = Some(v);
+        self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
 
-        // a row placeholder
-        self.range_fix_record[offset + MAX_CHUNKS as usize][0] = Some(N::zero());
+        self.range_fix_record[offset][RangeFixColIndex::ValueAccSelCol as usize] = Some(N::one());
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
+
+        // TODO: A row placeholder, I think it can be removed now
+        self.range_fix_record[offset + MAX_CHUNKS as usize - 1][0] = Some(N::zero());
 
         for (index, v) in decompose_v.iter().enumerate() {
-            let col = VALUE_COLUMNS - 1 - index / MAX_CHUNKS as usize;
+            let col_index_raw = index / MAX_CHUNKS as usize;
             let row_offset = index % MAX_CHUNKS as usize;
 
-            if col == 0 {
-                self.range_fix_record[offset + 1 + row_offset][1] =
+            let col = if col_index_raw < RANGE_CHIP_COMMON_RANGE_COLUMNS {
+                RangeAdvColIndex::CommonRangeColStart as usize + col_index_raw
+            } else {
+                self.range_fix_record[offset + row_offset][RangeFixColIndex::TagCol as usize] =
                     if index != decompose_v.len() - 1 {
                         Some(N::from(COMMON_RANGE_BITS as u64))
                     } else {
                         Some(N::from(leading_bits))
                     };
-            }
+                RangeAdvColIndex::TaggedRangeCol as usize
+            };
 
-            self.range_adv_record[offset + 1 + row_offset][col].0 = Some(*v);
+            self.range_adv_record[offset + row_offset][col].0 = Some(*v);
         }
 
-        AssignedValue::new(Chip::RangeChip, 0, offset, v)
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::ValueAccCol as usize,
+            offset,
+            v,
+        )
     }
 }
