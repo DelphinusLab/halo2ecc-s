@@ -6,7 +6,7 @@ use num_integer::Integer;
 use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
-use super::ecc_chip::MSM_PREFIX_SIZE;
+use super::ecc_chip::MSM_PREFIX_OFFSET;
 use super::integer_chip::IntegerChipOps;
 use super::select_chip::SelectChipOps;
 use crate::assign::AssignedCondition;
@@ -116,7 +116,7 @@ impl<C: CurveAffine> EccChipScalarOps<C, C::ScalarExt> for NativeScalarEccContex
     
     fn get_and_increase_msm_prefix(&mut self) -> usize {
         let ret = self.1;
-        self.1 += MSM_PREFIX_SIZE;
+        self.1 += MSM_PREFIX_OFFSET;
         ret
     }
 }

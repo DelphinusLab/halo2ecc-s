@@ -1,11 +1,14 @@
-use crate::{assign::AssignedValue, context::IntegerContext, range_info::*};
+use crate::{assign::AssignedValue, context::IntegerContext, range_info::*, utils::bn_to_field};
 
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
     plonk::{Advice, Column, ConstraintSystem, Expression, Fixed},
     poly::Rotation,
 };
+use num_bigint::BigUint;
 use std::{marker::PhantomData, sync::Arc, vec};
+
+pub const SELECTOR_ENCODE_OFFSET: usize = 128;
 
 /**
  * |limb_info | selector | encoded_offset | is_lookup |
@@ -13,7 +16,7 @@ use std::{marker::PhantomData, sync::Arc, vec};
  * | limb[0]  |    s     | --g----------  | 0 for set |
  * | limb[1]  |    s     | --g----------  | 1 for get |
  *
- * (limb_info, encode(selector, group), limboffset) in (lookup_info, comp_selector, limb_offset)
+ * (limb_info, encode(selector, group), limb_offset) in (lookup_info, comp_selector, limb_offset)
  */
 
 #[derive(Clone, Debug)]
@@ -52,7 +55,8 @@ impl<N: FieldExt> SelectChip<N> {
             let encoded_offset = meta.query_fixed(encoded_offset, Rotation::cur());
             let is_lookup = meta.query_fixed(is_lookup, Rotation::cur());
 
-            let selector_encode_shift = N::from(1u64 << 20);
+            let selector_encode_shift: N =
+                bn_to_field(&(BigUint::from(1u64) << SELECTOR_ENCODE_OFFSET));
 
             vec![
                 (limb_info.clone(), limb_info.clone()),
@@ -92,8 +96,10 @@ pub trait SelectChipOps<W: BaseExt, N: FieldExt> {
     ) -> AssignedValue<N>;
 }
 
-fn encode_offset(g: usize, offset: usize, limb_offset: usize) -> usize {
-    g * 1024 + limb_offset + (offset << 20)
+fn encode_offset<N: FieldExt>(g: usize, offset: usize, limb_offset: usize) -> N {
+    bn_to_field(
+        &((BigUint::from(offset) << 128) + (BigUint::from(g) << 64) + (BigUint::from(limb_offset))),
+    )
 }
 
 impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
@@ -111,11 +117,7 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
         let encoded_offset = encode_offset(group_index, selector, offset);
-        records.assign_cache_value(
-            self.ctx.borrow_mut().select_offset,
-            v,
-            N::from(encoded_offset as u64),
-        );
+        records.assign_cache_value(self.ctx.borrow_mut().select_offset, v, encoded_offset);
         self.ctx.borrow_mut().select_offset += 1;
     }
     fn assign_selected_value(
@@ -131,7 +133,7 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         let v = records.assign_select_value(
             self.ctx.borrow_mut().select_offset,
             v,
-            N::from(encoded_offset as u64),
+            encoded_offset,
             selector,
         );
         self.ctx.borrow_mut().select_offset += 1;

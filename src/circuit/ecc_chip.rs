@@ -14,7 +14,7 @@ use crate::assign::{AssignedCondition, AssignedCurvature, AssignedInteger, Assig
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::utils::{bn_to_field, field_to_bn};
 
-pub const MSM_PREFIX_SIZE: usize = 1 << 20;
+pub const MSM_PREFIX_OFFSET: usize = 1 << 20;
 
 pub enum UnsafeError {
     AddSameOrNegPoint,
@@ -44,7 +44,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         points: &Vec<AssignedPoint<C, N>>,
         scalars: &Vec<Self::AssignedScalar>,
     ) -> AssignedPoint<C, N> {
-        assert!(points.len() <= MSM_PREFIX_SIZE);
+        assert!(points.len() <= MSM_PREFIX_OFFSET);
 
         let best_group_size = 5;
         let n_group = (points.len() + best_group_size - 1) / best_group_size;
@@ -201,7 +201,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         rand_acc_point: C::Curve,
         rand_line_point: C::Curve,
     ) -> Result<AssignedNonZeroPoint<C, N>, UnsafeError> {
-        assert!(points.len() <= MSM_PREFIX_SIZE);
+        assert!(points.len() <= MSM_PREFIX_OFFSET);
         let rand_acc_point = self.assign_nonzero_point(&rand_acc_point);
         let rand_line_point = self.assign_nonzero_point(&rand_line_point);
 

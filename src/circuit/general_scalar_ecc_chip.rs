@@ -4,7 +4,7 @@ use halo2_proofs::arithmetic::FieldExt;
 use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
-use super::ecc_chip::MSM_PREFIX_SIZE;
+use super::ecc_chip::MSM_PREFIX_OFFSET;
 use super::integer_chip::IntegerChipOps;
 use super::select_chip::SelectChipOps;
 use crate::assign::AssignedCondition;
@@ -83,7 +83,7 @@ impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccCon
 
     fn get_and_increase_msm_prefix(&mut self) -> usize {
         let ret = self.msm_prefix;
-        self.msm_prefix += MSM_PREFIX_SIZE;
+        self.msm_prefix += MSM_PREFIX_OFFSET;
         ret
     }
 }
