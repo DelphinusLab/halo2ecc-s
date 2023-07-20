@@ -148,7 +148,7 @@ impl<N: FieldExt> RangeChip<N> {
             });
         }
 
-        meta.create_gate("full value acc check", |meta| {
+        meta.create_gate("full acc value check", |meta| {
             let value_acc_sel = meta.query_fixed(full_value_acc_sel, Rotation::cur());
             let value_acc = meta.query_advice(value_acc, Rotation::cur());
             let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);
@@ -174,7 +174,7 @@ impl<N: FieldExt> RangeChip<N> {
             vec![value_acc_sel * (acc.unwrap().0 - value_acc)]
         });
 
-        meta.create_gate("short value acc check", |meta| {
+        meta.create_gate("short acc value check", |meta| {
             let value_acc_sel = meta.query_fixed(short_value_acc_sel, Rotation::cur());
             let value_acc = meta.query_advice(value_acc, Rotation::cur());
             let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);

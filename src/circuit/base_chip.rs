@@ -464,6 +464,11 @@ pub trait BaseChipOps<N: FieldExt> {
         assert!(a.0.val == N::zero());
         self.assert_constant(&a.0, N::zero())
     }
+
+    fn try_assert_false(&mut self, a: &AssignedCondition<N>) -> bool {
+        self.assert_constant(&a.0, N::zero());
+        a.0.val == N::zero()
+    }
 }
 
 impl<N: FieldExt> BaseChipOps<N> for Context<N> {
