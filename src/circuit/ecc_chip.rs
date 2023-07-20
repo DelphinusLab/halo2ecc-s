@@ -214,28 +214,26 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
 
         let mut candidates = vec![];
         let group_prefix = self.get_and_increase_msm_prefix();
-        let mut group_index = group_prefix;
 
-        for (i, chunk) in points.chunks(group_size).enumerate() {
-            let init = if i.is_even() {
+        for (group_index, chunk) in points.chunks(group_size).enumerate() {
+            let init = if group_index.is_even() {
                 &rand_line_point
             } else {
                 &rand_line_point_neg
             };
 
             candidates.push(vec![init.clone()]);
-            self.assign_cache_point_unsafe(&init, group_index, 0 as usize);
+            self.assign_cache_point_unsafe(&init, group_prefix + group_index, 0 as usize);
 
             let cl = candidates.last_mut().unwrap();
             for i in 1..1u32 << chunk.len() {
-                let pos = 32 - i.leading_zeros() - 1;
+                let pos = i.reverse_bits().leading_zeros(); // find the last bit-1 position
                 let other = i - (1 << pos);
                 let p = self.ecc_add_unsafe(&cl[other as usize], &chunk[pos as usize])?;
                 let p = self.ecc_reduce_unsafe(&p);
-                self.assign_cache_point_unsafe(&p, group_index, i as usize);
+                self.assign_cache_point_unsafe(&p, group_prefix + group_index, i as usize);
                 cl.push(p);
             }
-            group_index += 1;
         }
 
         let bits = scalars
@@ -250,6 +248,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
 
         for wi in 0..bits[0].len() {
             acc = self.ecc_double_unsafe(&acc)?;
+            carry = self.ecc_double_unsafe(&carry)?;
 
             for group_index in 0..groups.len() {
                 let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
@@ -264,8 +263,6 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             if groups.len().is_odd() {
                 acc = self.ecc_add_unsafe(&acc, &rand_line_point_neg)?;
             }
-
-            carry = self.ecc_double_unsafe(&carry)?;
         }
 
         self.ecc_add_unsafe(&acc, &carry)
