@@ -1,4 +1,5 @@
 use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::arithmetic::Field;
 use halo2_proofs::arithmetic::FieldExt;
 
 use super::base_chip::BaseChipOps;
@@ -72,7 +73,8 @@ impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccCon
             }
         }
 
-        let mut res = bits.chunks(WINDOW_SIZE)
+        let mut res = bits
+            .chunks(WINDOW_SIZE)
             .map(|x| Vec::from(x).try_into().unwrap())
             .collect::<Vec<_>>();
 
@@ -85,5 +87,19 @@ impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccCon
         let ret = self.msm_prefix;
         self.msm_prefix += MSM_PREFIX_OFFSET;
         ret
+    }
+
+    fn ecc_bisec_scalar(
+        &mut self,
+        cond: &AssignedCondition<N>,
+        a: &Self::AssignedScalar,
+        b: &Self::AssignedScalar,
+    ) -> Self::AssignedScalar {
+        self.scalar_integer_ctx.bisec_int(cond, a, b)
+    }
+
+    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar {
+        self.scalar_integer_ctx
+            .assign_int_constant(C::ScalarExt::zero())
     }
 }

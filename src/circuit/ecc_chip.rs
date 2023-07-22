@@ -287,17 +287,34 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
     ) -> Result<AssignedPoint<C, N>, UnsafeError> {
         let r1 = C::generator() * C::Scalar::rand();
         let r2 = C::generator() * C::Scalar::rand();
+
         let mut nonzero_points = vec![];
-        for p in points {
-            nonzero_points.push(self.ecc_assert_nonzero_point(p)?);
+        let mut normalized_scalars = vec![];
+        let nonzero_p = self.assign_nonzero_point(&C::generator().to_curve());
+        let s_zero = self.ecc_assign_zero_scalar();
+
+        for (p, s) in points.iter().zip(scalars.iter()) {
+            let s = self.ecc_bisec_scalar(&p.z, &s_zero, s);
+            let p = self.ecc_bisec_to_an_unsafe_point(p, &nonzero_p);
+            nonzero_points.push(p);
+            normalized_scalars.push(s);
         }
-        let p = self.msm_batch_on_group_unsafe(&nonzero_points, scalars, r1, r2)?;
+        let p = self.msm_batch_on_group_unsafe(&nonzero_points, &normalized_scalars, r1, r2)?;
         Ok(self.ecc_nonzero_point_downgrade(&p))
     }
 
     fn ecc_mul(&mut self, a: &AssignedPoint<C, N>, s: Self::AssignedScalar) -> AssignedPoint<C, N> {
         self.msm(&vec![a.clone()], &vec![s.clone()])
     }
+
+    fn ecc_bisec_scalar(
+        &mut self,
+        cond: &AssignedCondition<N>,
+        a: &Self::AssignedScalar,
+        b: &Self::AssignedScalar,
+    ) -> Self::AssignedScalar;
+
+    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar;
 }
 
 pub trait EccBaseIntegerChipWrapper<W: BaseExt, N: FieldExt> {
@@ -865,5 +882,16 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
             y: a.y.clone(),
             z: AssignedCondition(zero),
         }
+    }
+
+    fn ecc_bisec_to_an_unsafe_point(
+        &mut self,
+        a: &AssignedPoint<C, N>,
+        b: &AssignedNonZeroPoint<C, N>,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let x = self.base_integer_chip().bisec_int(&a.z, &b.x, &a.x);
+        let y = self.base_integer_chip().bisec_int(&a.z, &b.y, &a.y);
+
+        AssignedNonZeroPoint::new(x, y)
     }
 }

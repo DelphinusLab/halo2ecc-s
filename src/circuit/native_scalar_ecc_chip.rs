@@ -25,12 +25,9 @@ impl<C: CurveAffine> EccBaseIntegerChipWrapper<C::Base, C::ScalarExt>
     ) -> &mut dyn IntegerChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
         &mut self.0
     }
-    fn select_chip(
-        &mut self,
-    ) -> &mut dyn SelectChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
+    fn select_chip(&mut self) -> &mut dyn SelectChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
         &mut self.0
     }
-
 }
 
 impl<C: CurveAffine> EccChipBaseOps<C, C::ScalarExt> for NativeScalarEccContext<C> {}
@@ -113,10 +110,25 @@ impl<C: CurveAffine> EccChipScalarOps<C, C::ScalarExt> for NativeScalarEccContex
         res.reverse();
         res
     }
-    
+
     fn get_and_increase_msm_prefix(&mut self) -> usize {
         let ret = self.1;
         self.1 += MSM_PREFIX_OFFSET;
         ret
+    }
+
+    fn ecc_bisec_scalar(
+        &mut self,
+        cond: &AssignedCondition<C::ScalarExt>,
+        a: &Self::AssignedScalar,
+        b: &Self::AssignedScalar,
+    ) -> Self::AssignedScalar {
+        self.base_integer_chip().base_chip().bisec(cond, a, b)
+    }
+
+    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar {
+        self.base_integer_chip()
+            .base_chip()
+            .assign_constant(C::ScalarExt::zero())
     }
 }
