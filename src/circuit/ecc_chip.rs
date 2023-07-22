@@ -295,7 +295,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
 
         for (p, s) in points.iter().zip(scalars.iter()) {
             let s = self.ecc_bisec_scalar(&p.z, &s_zero, s);
-            let p = self.ecc_bisec_to_an_unsafe_point(p, &nonzero_p);
+            let p = self.ecc_bisec_to_nonzero_point(p, &nonzero_p);
             nonzero_points.push(p);
             normalized_scalars.push(s);
         }
@@ -884,7 +884,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         }
     }
 
-    fn ecc_bisec_to_an_unsafe_point(
+    fn ecc_bisec_to_nonzero_point(
         &mut self,
         a: &AssignedPoint<C, N>,
         b: &AssignedNonZeroPoint<C, N>,
