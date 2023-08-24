@@ -6,6 +6,7 @@ use halo2_proofs::arithmetic::{BaseExt, CurveAffine, FieldExt};
 pub enum Chip {
     BaseChip = 0,
     RangeChip = 1,
+    SelectChip = 2,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -46,6 +47,12 @@ pub struct AssignedPoint<C: CurveAffine, N: FieldExt> {
     pub x: AssignedInteger<C::Base, N>,
     pub y: AssignedInteger<C::Base, N>,
     pub z: AssignedCondition<N>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AssignedNonZeroPoint<C: CurveAffine, N: FieldExt> {
+    pub x: AssignedInteger<C::Base, N>,
+    pub y: AssignedInteger<C::Base, N>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +100,12 @@ impl<C: CurveAffine, N: FieldExt> AssignedPoint<C, N> {
         z: AssignedCondition<N>,
     ) -> Self {
         Self { x, y, z }
+    }
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedNonZeroPoint<C, N> {
+    pub fn new(x: AssignedInteger<C::Base, N>, y: AssignedInteger<C::Base, N>) -> Self {
+        Self { x, y }
     }
 }
 

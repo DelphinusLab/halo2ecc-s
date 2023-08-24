@@ -20,7 +20,7 @@ fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1
     {
         let ctx = Rc::new(RefCell::new(Context::new()));
         let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
-        let mut ctx = NativeScalarEccContext::<G1Affine>(ctx);
+        let mut ctx = NativeScalarEccContext::<G1Affine>(ctx, 0);
 
         let a = G1Affine::random(&mut OsRng);
         let b = G2Affine::from(G2::random(&mut OsRng));
@@ -66,7 +66,7 @@ fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1
     {
         let ctx = Rc::new(RefCell::new(Context::new()));
         let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
-        let mut ctx = NativeScalarEccContext::<G1Affine>(ctx);
+        let mut ctx = NativeScalarEccContext::<G1Affine>(ctx, 0);
 
         let a = G1Affine::random(&mut OsRng);
         let b = G2Affine::from(G2::random(&mut OsRng));

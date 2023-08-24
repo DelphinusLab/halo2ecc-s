@@ -1,30 +1,42 @@
-use crate::{
-    assign::{AssignedValue, Cell, Chip, ValueSchema},
-    circuit::{
-        base_chip::{BaseChip, FIXED_COLUMNS, MUL_COLUMNS, VAR_COLUMNS},
-        range_chip::{RangeChip, COMMON_RANGE_BITS, MAX_CHUNKS},
-    },
-    range_info::RangeInfo,
-};
-use halo2_proofs::{
-    arithmetic::{BaseExt, CurveAffine, FieldExt},
-    circuit::{AssignedCell, Region},
-    plonk::Error,
-};
-use std::{
-    cell::RefCell,
-    fmt::{Display, Formatter},
-};
-use std::{
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+use crate::assign::AssignedValue;
+use crate::assign::Cell;
+use crate::assign::Chip;
+use crate::assign::ValueSchema;
+use crate::circuit::base_chip::BaseChip;
+use crate::circuit::base_chip::FIXED_COLUMNS;
+use crate::circuit::base_chip::MUL_COLUMNS;
+use crate::circuit::base_chip::VAR_COLUMNS;
+use crate::circuit::range_chip::RangeAdvColIndex;
+use crate::circuit::range_chip::RangeChip;
+use crate::circuit::range_chip::RangeFixColIndex;
+use crate::circuit::range_chip::COMMON_RANGE_BITS;
+use crate::circuit::range_chip::MAX_CHUNKS;
+use crate::circuit::range_chip::RANGE_CHIP_ADV_COLUMNS;
+use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
+use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+use crate::circuit::select_chip::SelectChip;
+use crate::range_info::RangeInfo;
+use halo2_proofs::arithmetic::BaseExt;
+use halo2_proofs::arithmetic::CurveAffine;
+use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::circuit::AssignedCell;
+use halo2_proofs::circuit::Region;
+use halo2_proofs::plonk::Error;
+use std::cell::RefCell;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct Context<N: FieldExt> {
     pub records: Arc<Mutex<Records<N>>>,
     pub base_offset: usize,
     pub range_offset: usize,
+    pub select_offset: usize,
 }
 
 impl<N: FieldExt> Display for Context<N> {
@@ -43,6 +55,7 @@ impl<N: FieldExt> Context<N> {
             records: Arc::new(Mutex::new(Records::default())),
             base_offset: 0,
             range_offset: 0,
+            select_offset: 0,
         }
     }
 }
@@ -79,8 +92,8 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
 
 pub struct NativeScalarEccContext<C: CurveAffine>(
     pub IntegerContext<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>,
+    pub usize, // msm prefix
 );
-
 
 impl<C: CurveAffine> From<NativeScalarEccContext<C>> for Context<C::Scalar> {
     fn from(value: NativeScalarEccContext<C>) -> Self {
@@ -92,6 +105,7 @@ pub struct GeneralScalarEccContext<C: CurveAffine, N: FieldExt> {
     pub base_integer_ctx: IntegerContext<<C as CurveAffine>::Base, N>,
     pub scalar_integer_ctx: IntegerContext<<C as CurveAffine>::ScalarExt, N>,
     pub native_ctx: Rc<RefCell<Context<N>>>,
+    pub msm_prefix: usize,
 }
 
 impl<C: CurveAffine, N: FieldExt> From<GeneralScalarEccContext<C, N>> for Context<N> {
@@ -108,6 +122,7 @@ impl<C: CurveAffine, N: FieldExt> GeneralScalarEccContext<C, N> {
             base_integer_ctx: IntegerContext::<C::Base, N>::new(ctx.clone()),
             scalar_integer_ctx: IntegerContext::<C::Scalar, N>::new(ctx.clone()),
             native_ctx: ctx,
+            msm_prefix: 0,
         }
     }
 }
@@ -118,9 +133,14 @@ pub struct Records<N: FieldExt> {
     pub base_fix_record: Vec<[Option<N>; FIXED_COLUMNS]>,
     pub base_height: usize,
 
-    pub range_adv_record: Vec<(Option<N>, bool)>,
-    pub range_fix_record: Vec<[Option<N>; 2]>,
+    pub range_adv_record: Vec<[(Option<N>, bool); RANGE_CHIP_ADV_COLUMNS]>,
+    pub range_fix_record: Vec<[Option<N>; RANGE_CHIP_FIX_COLUMNS]>,
     pub range_height: usize,
+
+    /* For picking point candidate from sum cache */
+    pub select_adv_record: Vec<[(Option<N>, bool); 2]>,
+    pub select_fix_record: Vec<[Option<N>; 2]>,
+    pub select_height: usize,
 
     pub permutations: Vec<(Cell, Cell)>,
 }
@@ -208,28 +228,22 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         range_chip: &RangeChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
-        let mut cells = vec![vec![None; self.range_height]];
+        let mut cells = vec![vec![None; self.range_height]; RANGE_CHIP_ADV_COLUMNS];
 
         for (row, fix) in self.range_fix_record.iter().enumerate() {
             if row >= self.range_height {
                 break;
             }
-            if fix[0].is_some() {
-                region.assign_fixed(
-                    || "range block first",
-                    range_chip.config.block_first,
-                    row,
-                    || Ok(fix[0].unwrap()),
-                )?;
-            }
 
-            if fix[1].is_some() {
-                region.assign_fixed(
-                    || "range class",
-                    range_chip.config.range_class,
-                    row,
-                    || Ok(fix[1].unwrap()),
-                )?;
+            for (col, fix) in fix.iter().enumerate() {
+                if let Some(v) = fix {
+                    region.assign_fixed(
+                        || "range fixed col",
+                        range_chip.config.fix_cols[col],
+                        row,
+                        || Ok(*v),
+                    )?;
+                }
             }
         }
 
@@ -237,19 +251,83 @@ impl<N: FieldExt> Records<N> {
             if row >= self.range_height {
                 break;
             }
-            if adv.0.is_some() {
-                let cell = region.assign_advice(
-                    || "range var",
-                    range_chip.config.value,
-                    row,
-                    || Ok(adv.0.unwrap()),
-                )?;
-                if adv.1 {
-                    cells[0][row] = Some(cell);
+
+            for (col, adv) in adv.iter().enumerate() {
+                if let Some(v) = &adv.0 {
+                    let cell = region.assign_advice(
+                        || "range adv col",
+                        range_chip.config.adv_cols[col],
+                        row,
+                        || Ok(*v),
+                    )?;
+                    if adv.1 {
+                        cells[col][row] = Some(cell);
+                    }
                 }
             }
         }
 
+        Ok(cells)
+    }
+
+    fn _assign_to_select_chip(
+        &self,
+        region: &mut Region<'_, N>,
+        select_chip: &SelectChip<N>,
+    ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
+        let mut cells = vec![];
+
+        cells.resize(4, vec![None; self.select_height]);
+
+        for (row, advs) in self.select_adv_record.iter().enumerate() {
+            if row >= self.base_height {
+                break;
+            }
+            if advs[0].0.is_some() {
+                let cell = region.assign_advice(
+                    || "base",
+                    select_chip.config.limb_info,
+                    row,
+                    || Ok(advs[0].0.unwrap()),
+                )?;
+                if advs[0].1 {
+                    cells[0][row] = Some(cell);
+                }
+            }
+            if advs[1].0.is_some() {
+                let cell = region.assign_advice(
+                    || "base",
+                    select_chip.config.selector,
+                    row,
+                    || Ok(advs[1].0.unwrap()),
+                )?;
+                if advs[1].1 {
+                    cells[1][row] = Some(cell);
+                }
+            }
+        }
+
+        for (row, fixes) in self.select_fix_record.iter().enumerate() {
+            if row >= self.base_height {
+                break;
+            }
+            if fixes[0].is_some() {
+                region.assign_fixed(
+                    || "encoded offset",
+                    select_chip.config.encoded_offset,
+                    row,
+                    || Ok(fixes[0].unwrap()),
+                )?;
+            }
+            if fixes[1].is_some() {
+                region.assign_fixed(
+                    || "is_lookup",
+                    select_chip.config.is_lookup,
+                    row,
+                    || Ok(fixes[1].unwrap()),
+                )?;
+            }
+        }
         Ok(cells)
     }
 
@@ -289,13 +367,18 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
+        select_chip: &SelectChip<N>,
     ) -> Result<Option<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>>, Error> {
-        let max_row = usize::max(self.base_height, self.range_height);
+        let max_row = self
+            .base_height
+            .max(self.range_height)
+            .max(self.select_height);
         let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
         if !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
             let range_cells = self._assign_to_range_chip(region, range_chip)?;
-            let cells = vec![base_cells, range_cells];
+            let select_cells = self._assign_to_select_chip(region, select_chip)?;
+            let cells = vec![base_cells, range_cells, select_cells];
             self._assign_permutation(region, &cells)?;
             Ok(Some(cells))
         } else {
@@ -308,10 +391,12 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
+        select_chip: &SelectChip<N>,
     ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
         let base_cells = self._assign_to_base_chip(region, base_chip)?;
         let range_cells = self._assign_to_range_chip(region, range_chip)?;
-        let cells = vec![base_cells, range_cells];
+        let select_cells = self._assign_to_select_chip(region, select_chip)?;
+        let cells = vec![base_cells, range_cells, select_cells];
         self._assign_permutation(region, &cells)?;
         Ok(cells)
     }
@@ -319,7 +404,8 @@ impl<N: FieldExt> Records<N> {
     pub fn enable_permute(&mut self, cell: &Cell) {
         match cell.region {
             Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
-            Chip::RangeChip => self.range_adv_record[cell.row].1 = true,
+            Chip::RangeChip => self.range_adv_record[cell.row][cell.col].1 = true,
+            Chip::SelectChip => self.select_adv_record[cell.row][cell.col].1 = true,
         }
     }
 
@@ -410,13 +496,69 @@ impl<N: FieldExt> Records<N> {
 
         if offset >= self.range_adv_record.len() {
             let to_len = (offset + EXTEND_SIZE) & !(EXTEND_SIZE - 1);
-            self.range_adv_record.resize(to_len, (None, false));
-            self.range_fix_record.resize(to_len, [None; 2]);
+            self.range_adv_record
+                .resize(to_len, [(None, false); RANGE_CHIP_ADV_COLUMNS]);
+            self.range_fix_record
+                .resize(to_len, [None; RANGE_CHIP_FIX_COLUMNS]);
         }
 
         if offset >= self.range_height {
             self.range_height = offset + 1;
         }
+    }
+
+    pub fn assign_cache_value(&mut self, offset: usize, v: &AssignedValue<N>, encode: N) {
+        //println!("Cache [offset, v, encode] {:?} {:?} {:?}", offset, v.val, encode);
+        if offset >= self.select_fix_record.len() {
+            self.select_adv_record.resize(1 << 20, [(None, false); 2]);
+            self.select_fix_record.resize(1 << 20, [None; 2]);
+        }
+
+        if offset >= self.select_height {
+            self.select_height = offset + 1;
+        }
+
+        assert!(offset < 1 << 20);
+
+        self.select_adv_record[offset][0].0 = Some(v.val);
+        let idx = Cell::new(Chip::SelectChip, 0, offset);
+        self.permutations.push((idx, v.cell));
+        self.enable_permute(&idx);
+        self.enable_permute(&v.cell);
+        // assign encode
+        self.select_fix_record[offset][0] = Some(encode);
+        self.select_fix_record[offset][1] = Some(N::zero());
+    }
+
+    pub fn assign_select_value(
+        &mut self,
+        offset: usize,
+        v: &AssignedValue<N>,
+        encode: N,
+        selector: &AssignedValue<N>,
+    ) -> AssignedValue<N> {
+        //println!("Select [offset, v, encode, value] {:?} {:?} {:?} {:?}", offset, v.val, encode, selector.val);
+        if offset >= self.select_fix_record.len() {
+            self.select_adv_record.resize(1 << 20, [(None, false); 2]);
+            self.select_fix_record.resize(1 << 20, [None; 2]);
+        }
+
+        if offset >= self.select_height {
+            self.select_height = offset + 1;
+        }
+
+        assert!(offset < 1 << 20);
+
+        self.select_adv_record[offset][0].0 = Some(v.val);
+        self.select_adv_record[offset][1].0 = Some(selector.val);
+        let selector_cell = Cell::new(Chip::SelectChip, 1, offset);
+        self.permutations.push((selector_cell, selector.cell));
+        self.enable_permute(&selector_cell);
+        self.enable_permute(&selector.cell);
+        self.select_fix_record[offset][0] = Some(encode);
+        self.select_fix_record[offset][1] = Some(N::one());
+
+        AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
     }
 
     pub fn assign_single_range_value(
@@ -427,35 +569,118 @@ impl<N: FieldExt> Records<N> {
     ) -> AssignedValue<N> {
         self.ensure_range_record_size(offset + 1);
 
-        self.range_fix_record[offset][1] = Some(N::from(leading_bits));
-        self.range_adv_record[offset].0 = Some(v);
+        self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] =
+            Some(N::from(leading_bits));
+        self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v);
 
-        AssignedValue::new(Chip::RangeChip, 0, offset, v)
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::TaggedRangeCol as usize,
+            offset,
+            v,
+        )
     }
 
-    pub fn assign_range_value(
+    fn assign_full_acc_range_value(
         &mut self,
         offset: usize,
-        (v, chunks): (N, Vec<N>),
+        (v, decompose_v): (N, Vec<N>),
         leading_bits: u64,
     ) -> AssignedValue<N> {
-        assert!(chunks.len() as u64 <= MAX_CHUNKS);
-        self.ensure_range_record_size(offset + 1 + MAX_CHUNKS as usize);
+        assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
+        assert!(
+            decompose_v.len() as u64 > RANGE_VALUE_DECOMPOSE_COMMON_PARTS
+                || leading_bits == COMMON_RANGE_BITS
+        );
 
-        self.range_fix_record[offset][0] = Some(N::one());
-        self.range_adv_record[offset].0 = Some(v);
+        self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
 
-        // a row placeholder
-        self.range_fix_record[offset + MAX_CHUNKS as usize][0] = Some(N::zero());
+        self.range_fix_record[offset][RangeFixColIndex::FullValueAccSelCol as usize] =
+            Some(N::one());
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
 
-        for i in 0..chunks.len() - 1 {
-            self.range_fix_record[offset + 1 + i][1] = Some(N::from(COMMON_RANGE_BITS as u64));
+        for (index, v) in decompose_v.iter().enumerate() {
+            let col_index_raw = index / MAX_CHUNKS as usize;
+            let row_offset = index % MAX_CHUNKS as usize;
+
+            let col = if col_index_raw < RANGE_CHIP_COMMON_RANGE_COLUMNS {
+                RangeAdvColIndex::CommonRangeColStart as usize + col_index_raw
+            } else {
+                self.range_fix_record[offset + row_offset][RangeFixColIndex::TagCol as usize] =
+                    if index != decompose_v.len() - 1 {
+                        Some(N::from(COMMON_RANGE_BITS as u64))
+                    } else {
+                        Some(N::from(leading_bits))
+                    };
+                RangeAdvColIndex::TaggedRangeCol as usize
+            };
+
+            self.range_adv_record[offset + row_offset][col].0 = Some(*v);
         }
-        self.range_fix_record[offset + chunks.len()][1] = Some(N::from(leading_bits));
 
-        for i in 0..chunks.len() {
-            self.range_adv_record[offset + 1 + i].0 = Some(chunks[i]);
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::ValueAccCol as usize,
+            offset,
+            v,
+        )
+    }
+
+    fn assign_short_acc_range_value(
+        &mut self,
+        offset: usize,
+        (v, decompose_v): (N, Vec<N>),
+        leading_bits: u64,
+    ) -> AssignedValue<N> {
+        assert!(decompose_v.len() as u64 <= MAX_CHUNKS);
+
+        self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
+
+        self.range_fix_record[offset][RangeFixColIndex::ShortValueAccSelCol as usize] =
+            Some(N::one());
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
+
+        for (index, v) in decompose_v.iter().enumerate() {
+            self.range_fix_record[offset + index][RangeFixColIndex::TagCol as usize] =
+                if index != decompose_v.len() - 1 {
+                    Some(N::from(COMMON_RANGE_BITS as u64))
+                } else {
+                    Some(N::from(leading_bits))
+                };
+
+            self.range_adv_record[offset + index][RangeAdvColIndex::TaggedRangeCol as usize].0 =
+                Some(*v);
         }
-        AssignedValue::new(Chip::RangeChip, 0, offset, v)
+
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::ValueAccCol as usize,
+            offset,
+            v,
+        )
+    }
+
+    pub fn assign_acc_range_value(
+        &mut self,
+        offset: usize,
+        (v, decompose_v): (N, Vec<N>),
+        leading_bits: u64,
+    ) -> AssignedValue<N> {
+        assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
+        if (leading_bits == COMMON_RANGE_BITS
+            && decompose_v.len() == RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize)
+            || decompose_v.len() > RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize
+        {
+            self.assign_full_acc_range_value(offset, (v, decompose_v), leading_bits)
+        } else if decompose_v.len() <= MAX_CHUNKS as usize {
+            self.assign_short_acc_range_value(offset, (v, decompose_v), leading_bits)
+        } else {
+            eprintln!(
+                "attempt to assign unsupported range value, len: {}, leading bits: {}",
+                decompose_v.len(),
+                leading_bits
+            );
+            unreachable!()
+        }
     }
 }
