@@ -7,7 +7,7 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-halo2_proofs = { git = "https://github.com/junyu0312/halo2.git", branch = "gpu", default-features = true }
+halo2_proofs = { git = "https://github.com/DelphinusLab/halo2-gpu-specific.git", default-features = true }
 num-integer = "0.1"
 num-bigint = { version = "0.4", features = ["rand"] }
 rayon = "1.5.2"
