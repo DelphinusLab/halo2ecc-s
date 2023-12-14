@@ -31,6 +31,7 @@ pub mod general_scalar_pairing_chip;
 pub mod integer_chip;
 pub mod native_scalar_ecc_chip;
 pub mod native_scalar_pairing_chip;
+#[cfg(not(feature = "small-circuit"))]
 pub mod range_chip;
 
 fn random<N: BaseExt>() -> N {

@@ -67,7 +67,7 @@ pub const RANGE_VALUE_DECOMPOSE_COMMON_PARTS: u64 =
  *
  *  short accumulate mode allows bits in
  *     max_a_bits <= MAX_CHUNKS * COMMON_RANGE_BITS]
- *  
+ *
  *  full accumulate mode allows bits in
  *     max_a_bits >= MAX_CHUNKS * RANGE_CHIP_COMMON_RANGE_COLUMNS * COMMON_RANGE_BITS
  *  && max_a_bits <= MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS * COMMON_RANGE_BITS
@@ -266,12 +266,9 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N> {
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_single_range_value(
-            self.ctx.borrow_mut().range_offset,
-            bn_to_field(bn),
-            COMMON_RANGE_BITS,
-        );
-        self.ctx.borrow_mut().range_offset += 1;
+        let (res, offset_increase) =
+            records.assign_common_range_value(self.ctx.borrow_mut().range_offset, bn_to_field(bn));
+        self.ctx.borrow_mut().range_offset += offset_increase;
         res
     }
 

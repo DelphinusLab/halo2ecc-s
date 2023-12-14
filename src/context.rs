@@ -6,16 +6,10 @@ use crate::circuit::base_chip::BaseChip;
 use crate::circuit::base_chip::FIXED_COLUMNS;
 use crate::circuit::base_chip::MUL_COLUMNS;
 use crate::circuit::base_chip::VAR_COLUMNS;
-use crate::circuit::range_chip::RangeAdvColIndex;
 use crate::circuit::range_chip::RangeChip;
-use crate::circuit::range_chip::RangeFixColIndex;
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
-use crate::circuit::range_chip::MAX_CHUNKS;
 use crate::circuit::range_chip::RANGE_CHIP_ADV_COLUMNS;
-use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
 use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
 use crate::circuit::select_chip::SelectChip;
 use crate::range_info::RangeInfo;
 use halo2_proofs::arithmetic::BaseExt;
@@ -136,6 +130,8 @@ pub struct Records<N: FieldExt> {
     pub range_adv_record: Vec<[(Option<N>, bool); RANGE_CHIP_ADV_COLUMNS]>,
     pub range_fix_record: Vec<[Option<N>; RANGE_CHIP_FIX_COLUMNS]>,
     pub range_height: usize,
+
+    pub free_common_cells: Vec<(usize, usize)>,
 
     /* For picking point candidate from sum cache */
     pub select_adv_record: Vec<[(Option<N>, bool); 2]>,
@@ -561,17 +557,29 @@ impl<N: FieldExt> Records<N> {
         AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
     }
 
+    #[cfg(not(feature = "small-circuit"))]
     pub fn assign_single_range_value(
         &mut self,
         offset: usize,
         v: N,
         leading_bits: u64,
     ) -> AssignedValue<N> {
+        use crate::circuit::range_chip::RangeAdvColIndex;
+        use crate::circuit::range_chip::RangeFixColIndex;
+        use crate::circuit::range_chip::MAX_CHUNKS;
+        use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+
         self.ensure_range_record_size(offset + 1);
 
         self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] =
             Some(N::from(leading_bits));
         self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v);
+
+        for col in 0..RANGE_CHIP_COMMON_RANGE_COLUMNS {
+            self.free_common_cells.push((col, offset))
+        }
 
         AssignedValue::new(
             Chip::RangeChip,
@@ -581,12 +589,65 @@ impl<N: FieldExt> Records<N> {
         )
     }
 
+    #[cfg(not(feature = "small-circuit"))]
+    pub fn assign_common_range_value(&mut self, offset: usize, v: N) -> (AssignedValue<N>, usize) {
+        use crate::circuit::range_chip::RangeAdvColIndex;
+        use crate::circuit::range_chip::RangeFixColIndex;
+        use crate::circuit::range_chip::MAX_CHUNKS;
+        use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+
+        if let Some((col, offset)) = self.free_common_cells.pop() {
+            self.range_adv_record[offset][RangeAdvColIndex::CommonRangeColStart as usize + col].0 =
+                Some(v);
+
+            (
+                AssignedValue::new(
+                    Chip::RangeChip,
+                    RangeAdvColIndex::CommonRangeColStart as usize + col,
+                    offset,
+                    v,
+                ),
+                0,
+            )
+        } else {
+            self.ensure_range_record_size(offset + 1);
+
+            self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] =
+                Some(N::from(COMMON_RANGE_BITS));
+            self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v);
+
+            for col in 0..RANGE_CHIP_COMMON_RANGE_COLUMNS {
+                self.free_common_cells.push((col, offset))
+            }
+
+            (
+                AssignedValue::new(
+                    Chip::RangeChip,
+                    RangeAdvColIndex::TaggedRangeCol as usize,
+                    offset,
+                    v,
+                ),
+                1,
+            )
+        }
+    }
+
+    #[cfg(not(feature = "small-circuit"))]
     fn assign_full_acc_range_value(
         &mut self,
         offset: usize,
         (v, decompose_v): (N, Vec<N>),
         leading_bits: u64,
     ) -> AssignedValue<N> {
+        use crate::circuit::range_chip::RangeAdvColIndex;
+        use crate::circuit::range_chip::RangeFixColIndex;
+        use crate::circuit::range_chip::MAX_CHUNKS;
+        use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+
         assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
         assert!(
             decompose_v.len() as u64 > RANGE_VALUE_DECOMPOSE_COMMON_PARTS
@@ -626,12 +687,20 @@ impl<N: FieldExt> Records<N> {
         )
     }
 
+    #[cfg(not(feature = "small-circuit"))]
     fn assign_short_acc_range_value(
         &mut self,
         offset: usize,
         (v, decompose_v): (N, Vec<N>),
         leading_bits: u64,
     ) -> AssignedValue<N> {
+        use crate::circuit::range_chip::RangeAdvColIndex;
+        use crate::circuit::range_chip::RangeFixColIndex;
+        use crate::circuit::range_chip::MAX_CHUNKS;
+        use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+
         assert!(decompose_v.len() as u64 <= MAX_CHUNKS);
 
         self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
@@ -652,6 +721,12 @@ impl<N: FieldExt> Records<N> {
                 Some(*v);
         }
 
+        for col in 0..RANGE_CHIP_COMMON_RANGE_COLUMNS {
+            for i in 0..MAX_CHUNKS as usize {
+                self.free_common_cells.push((col, offset + i))
+            }
+        }
+
         AssignedValue::new(
             Chip::RangeChip,
             RangeAdvColIndex::ValueAccCol as usize,
@@ -660,12 +735,20 @@ impl<N: FieldExt> Records<N> {
         )
     }
 
+    #[cfg(not(feature = "small-circuit"))]
     pub fn assign_acc_range_value(
         &mut self,
         offset: usize,
         (v, decompose_v): (N, Vec<N>),
         leading_bits: u64,
     ) -> AssignedValue<N> {
+        use crate::circuit::range_chip::RangeAdvColIndex;
+        use crate::circuit::range_chip::RangeFixColIndex;
+        use crate::circuit::range_chip::MAX_CHUNKS;
+        use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
+        use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+
         assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
         if (leading_bits == COMMON_RANGE_BITS
             && decompose_v.len() == RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize)
@@ -682,5 +765,20 @@ impl<N: FieldExt> Records<N> {
             );
             unreachable!()
         }
+    }
+
+    #[cfg(feature = "small-circuit")]
+    pub fn assign_range_value_in_small_circuit(
+        &mut self,
+        offset: usize,
+        v: N,
+        bits: u64,
+    ) -> AssignedValue<N> {
+        self.ensure_range_record_size(offset + 1);
+
+        self.range_fix_record[offset][0] = Some(N::from(bits));
+        self.range_adv_record[offset][0].0 = Some(v);
+
+        AssignedValue::new(Chip::RangeChip, 0, offset, v)
     }
 }

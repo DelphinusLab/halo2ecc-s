@@ -482,7 +482,6 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
         MUL_COLUMNS
     }
 
-
     fn enable_permute(&mut self, x: &AssignedValue<N>) {
         let mut records = self.records.lock().unwrap();
         records.enable_permute(&x.cell);
@@ -516,7 +515,6 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
 
     fn one_line_with_last(
         &mut self,
-
         base_coeff_pairs: Vec<(ValueSchema<'_, N>, N)>,
         last: (ValueSchema<'_, N>, N),
         constant: Option<N>,

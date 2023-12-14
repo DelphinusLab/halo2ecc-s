@@ -8,5 +8,11 @@ pub mod general_scalar_ecc_chip;
 pub mod integer_chip;
 pub mod native_scalar_ecc_chip;
 pub mod pairing_chip;
-pub mod range_chip;
 pub mod select_chip;
+
+#[cfg(not(feature = "small-circuit"))]
+pub mod range_chip;
+
+#[cfg(feature = "small-circuit")]
+#[path = "range_chip_small.rs"]
+pub mod range_chip;
