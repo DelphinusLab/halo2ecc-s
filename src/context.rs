@@ -148,7 +148,7 @@ pub struct Records<N: FieldExt> {
 impl<N: FieldExt> Records<N> {
     fn assign_for_max_row(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
         max_row: usize,
     ) -> Result<bool, Error> {
@@ -171,7 +171,7 @@ impl<N: FieldExt> Records<N> {
 
     fn _assign_to_base_chip(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
         let mut cells = vec![];
@@ -225,7 +225,7 @@ impl<N: FieldExt> Records<N> {
 
     pub fn _assign_to_range_chip(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         range_chip: &RangeChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
         let mut cells = vec![vec![None; self.range_height]; RANGE_CHIP_ADV_COLUMNS];
@@ -272,7 +272,7 @@ impl<N: FieldExt> Records<N> {
 
     fn _assign_to_select_chip(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         select_chip: &SelectChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
         let mut cells = vec![];
@@ -333,7 +333,7 @@ impl<N: FieldExt> Records<N> {
 
     pub fn _assign_permutation(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         cells: &Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>,
     ) -> Result<(), Error> {
         for (left, right) in self.permutations.iter() {
@@ -353,7 +353,7 @@ impl<N: FieldExt> Records<N> {
 
     pub fn assign_all_in_base(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
     ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
         let cells = self._assign_to_base_chip(region, base_chip)?;
@@ -364,7 +364,7 @@ impl<N: FieldExt> Records<N> {
 
     pub fn assign_all_opt(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
         select_chip: &SelectChip<N>,
@@ -388,7 +388,7 @@ impl<N: FieldExt> Records<N> {
 
     pub fn assign_all(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
         select_chip: &SelectChip<N>,
