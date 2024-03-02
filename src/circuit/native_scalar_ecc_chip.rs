@@ -6,9 +6,7 @@ use num_integer::Integer;
 use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
-use super::ecc_chip::MSM_PREFIX_OFFSET;
 use super::integer_chip::IntegerChipOps;
-use super::select_chip::SelectChipOps;
 use crate::assign::AssignedCondition;
 use crate::assign::AssignedValue;
 use crate::circuit::ecc_chip::EccChipBaseOps;
@@ -23,9 +21,6 @@ impl<C: CurveAffine> EccBaseIntegerChipWrapper<C::Base, C::ScalarExt>
     fn base_integer_chip(
         &mut self,
     ) -> &mut dyn IntegerChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
-        &mut self.0
-    }
-    fn select_chip(&mut self) -> &mut dyn SelectChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
         &mut self.0
     }
 }
@@ -109,12 +104,6 @@ impl<C: CurveAffine> EccChipScalarOps<C, C::ScalarExt> for NativeScalarEccContex
             .collect();
         res.reverse();
         res
-    }
-
-    fn get_and_increase_msm_prefix(&mut self) -> usize {
-        let ret = self.1;
-        self.1 += MSM_PREFIX_OFFSET;
-        ret
     }
 
     fn ecc_bisec_scalar(

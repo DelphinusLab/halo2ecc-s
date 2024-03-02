@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
+    arithmetic::{BaseExt, FieldExt, MultiMillerLoop},
     circuit::{Layouter, SimpleFloorPlanner},
     dev::MockProver,
     pairing::bn256::{Bn256, Fr, G1Affine},
@@ -20,7 +20,6 @@ use crate::{
     circuit::{
         base_chip::{BaseChip, BaseChipConfig},
         range_chip::{RangeChip, RangeChipConfig},
-        select_chip::{SelectChip, SelectChipConfig},
     },
     context::{Context, Records},
 };
@@ -62,7 +61,6 @@ fn random_bls12_381_fq() -> halo2_proofs::pairing::bls12_381::Fq {
 struct TestChipConfig {
     base_chip_config: BaseChipConfig,
     range_chip_config: RangeChipConfig,
-    select_chip_config: SelectChipConfig,
 }
 
 #[derive(Default, Clone)]
@@ -81,11 +79,9 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
         let base_chip_config = BaseChip::configure(meta);
         let range_chip_config = RangeChip::<N>::configure(meta);
-        let select_chip_config = SelectChip::<N>::configure(meta);
         TestChipConfig {
             base_chip_config,
             range_chip_config,
-            select_chip_config,
         }
     }
 
@@ -96,7 +92,6 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     ) -> Result<(), Error> {
         let base_chip = BaseChip::new(config.base_chip_config);
         let range_chip = RangeChip::<N>::new(config.range_chip_config);
-        let select_chip = SelectChip::<N>::new(config.select_chip_config);
 
         range_chip.init_table(&mut layouter)?;
 
@@ -105,7 +100,7 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
             |mut region| {
                 let timer = start_timer!(|| "assign");
                 self.records
-                    .assign_all(&mut region, &base_chip, &range_chip, &select_chip)?;
+                    .assign_all(&mut region, &base_chip, &range_chip)?;
                 end_timer!(timer);
                 Ok(())
             },
@@ -116,7 +111,10 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
 }
 
 pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
-    println!("offset {} {} {}", ctx.range_offset, ctx.base_offset, ctx.select_offset);
+    println!(
+        "offset range: {}, base: {}",
+        ctx.range_offset, ctx.base_offset
+    );
 
     let circuit = TestCircuit::<Fr> {
         records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
@@ -129,15 +127,42 @@ pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
     assert_eq!(prover.verify(), Ok(()));
 }
 
+pub fn load_or_build_unsafe_params<E: MultiMillerLoop>(
+    k: u32,
+    cache_file_opt: Option<&Path>,
+) -> Params<E::G1Affine> {
+    if let Some(cache_file) = &cache_file_opt {
+        if Path::exists(&cache_file) {
+            println!("read params K={} from {:?}", k, cache_file);
+            let mut fd = std::fs::File::open(&cache_file).unwrap();
+            return Params::<E::G1Affine>::read(&mut fd).unwrap();
+        }
+    }
+
+    let params = Params::<E::G1Affine>::unsafe_setup::<E>(k);
+
+    if let Some(cache_file) = &cache_file_opt {
+        println!("write params K={} to {:?}", k, cache_file);
+        let mut fd = std::fs::File::create(&cache_file).unwrap();
+        params.write(&mut fd).unwrap();
+    };
+
+    params
+}
+
 pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
-    println!("offset {} {}", ctx.range_offset, ctx.base_offset);
+    println!(
+        "offset range: {}, base: {}",
+        ctx.range_offset, ctx.base_offset
+    );
 
     let circuit = TestCircuit::<Fr> {
         records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
     };
 
     let timer = start_timer!(|| format!("build params with K = {}", k));
-    let params: Params<G1Affine> = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+    let params: Params<G1Affine> =
+        load_or_build_unsafe_params::<Bn256>(k, Some(Path::new(&format!("./k{}.params", k))));
     end_timer!(timer);
 
     let timer = start_timer!(|| "build vk");
@@ -156,7 +181,6 @@ pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
     create_proof(&params, &pk, &[circuit], &[&[]], OsRng, &mut transcript)
         .expect("proof generation should not fail");
     end_timer!(timer);
-
     let proof = transcript.finalize();
 
     let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();

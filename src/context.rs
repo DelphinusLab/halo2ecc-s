@@ -16,7 +16,6 @@ use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
 use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
-use crate::circuit::select_chip::SelectChip;
 use crate::range_info::RangeInfo;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -36,7 +35,6 @@ pub struct Context<N: FieldExt> {
     pub records: Arc<Mutex<Records<N>>>,
     pub base_offset: usize,
     pub range_offset: usize,
-    pub select_offset: usize,
 }
 
 impl<N: FieldExt> Display for Context<N> {
@@ -55,7 +53,6 @@ impl<N: FieldExt> Context<N> {
             records: Arc::new(Mutex::new(Records::default())),
             base_offset: 0,
             range_offset: 0,
-            select_offset: 0,
         }
     }
 }
@@ -90,6 +87,7 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct NativeScalarEccContext<C: CurveAffine>(
     pub IntegerContext<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>,
     pub usize, // msm prefix
@@ -101,6 +99,7 @@ impl<C: CurveAffine> From<NativeScalarEccContext<C>> for Context<C::Scalar> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct GeneralScalarEccContext<C: CurveAffine, N: FieldExt> {
     pub base_integer_ctx: IntegerContext<<C as CurveAffine>::Base, N>,
     pub scalar_integer_ctx: IntegerContext<<C as CurveAffine>::ScalarExt, N>,
@@ -270,67 +269,6 @@ impl<N: FieldExt> Records<N> {
         Ok(cells)
     }
 
-    fn _assign_to_select_chip(
-        &self,
-        region: &mut Region<'_, N>,
-        select_chip: &SelectChip<N>,
-    ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
-        let mut cells = vec![];
-
-        cells.resize(4, vec![None; self.select_height]);
-
-        for (row, advs) in self.select_adv_record.iter().enumerate() {
-            if row >= self.base_height {
-                break;
-            }
-            if advs[0].0.is_some() {
-                let cell = region.assign_advice(
-                    || "base",
-                    select_chip.config.limb_info,
-                    row,
-                    || Ok(advs[0].0.unwrap()),
-                )?;
-                if advs[0].1 {
-                    cells[0][row] = Some(cell);
-                }
-            }
-            if advs[1].0.is_some() {
-                let cell = region.assign_advice(
-                    || "base",
-                    select_chip.config.selector,
-                    row,
-                    || Ok(advs[1].0.unwrap()),
-                )?;
-                if advs[1].1 {
-                    cells[1][row] = Some(cell);
-                }
-            }
-        }
-
-        for (row, fixes) in self.select_fix_record.iter().enumerate() {
-            if row >= self.base_height {
-                break;
-            }
-            if fixes[0].is_some() {
-                region.assign_fixed(
-                    || "encoded offset",
-                    select_chip.config.encoded_offset,
-                    row,
-                    || Ok(fixes[0].unwrap()),
-                )?;
-            }
-            if fixes[1].is_some() {
-                region.assign_fixed(
-                    || "is_lookup",
-                    select_chip.config.is_lookup,
-                    row,
-                    || Ok(fixes[1].unwrap()),
-                )?;
-            }
-        }
-        Ok(cells)
-    }
-
     pub fn _assign_permutation(
         &self,
         region: &mut Region<'_, N>,
@@ -367,7 +305,6 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
-        select_chip: &SelectChip<N>,
     ) -> Result<Option<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>>, Error> {
         let max_row = self
             .base_height
@@ -377,8 +314,7 @@ impl<N: FieldExt> Records<N> {
         if !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
             let range_cells = self._assign_to_range_chip(region, range_chip)?;
-            let select_cells = self._assign_to_select_chip(region, select_chip)?;
-            let cells = vec![base_cells, range_cells, select_cells];
+            let cells = vec![base_cells, range_cells];
             self._assign_permutation(region, &cells)?;
             Ok(Some(cells))
         } else {
@@ -391,12 +327,10 @@ impl<N: FieldExt> Records<N> {
         region: &mut Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
-        select_chip: &SelectChip<N>,
     ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
         let base_cells = self._assign_to_base_chip(region, base_chip)?;
         let range_cells = self._assign_to_range_chip(region, range_chip)?;
-        let select_cells = self._assign_to_select_chip(region, select_chip)?;
-        let cells = vec![base_cells, range_cells, select_cells];
+        let cells = vec![base_cells, range_cells];
         self._assign_permutation(region, &cells)?;
         Ok(cells)
     }
