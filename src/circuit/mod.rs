@@ -7,3 +7,4 @@ pub mod general_scalar_ecc_chip;
 pub mod integer_chip;
 pub mod native_scalar_ecc_chip;
 pub mod pairing_chip;
+pub mod keccak_chip;

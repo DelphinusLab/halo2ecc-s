@@ -31,6 +31,7 @@ pub mod integer_chip;
 pub mod native_scalar_ecc_chip;
 pub mod native_scalar_pairing_chip;
 pub mod range_chip;
+pub mod keccak_chip;
 
 fn random<N: BaseExt>() -> N {
     let seed = chrono::offset::Utc::now()
