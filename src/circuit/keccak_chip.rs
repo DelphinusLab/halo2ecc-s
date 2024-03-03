@@ -242,12 +242,45 @@ pub trait KeccakChipOps<N: FieldExt> {
         }
 
         let aligned_len =
-            (raw_len + 2 + ABSORB_BITS_RATE - 1) / ABSORB_BITS_RATE * ABSORB_BITS_RATE;
-        input_bits.push(assigned_one.clone());
-        for _ in raw_len + 1..aligned_len - 1 {
+            (raw_len + 8 + ABSORB_BITS_RATE - 1) / ABSORB_BITS_RATE * ABSORB_BITS_RATE;
+        let padding_len = aligned_len - raw_len;
+
+        if padding_len == 8 {
+            // padding 0x86
+            input_bits.push(assigned_one.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_one.clone());
+            input_bits.push(assigned_one.clone());
+            input_bits.push(assigned_zero.clone());
+        } else {
+            // padding 0x06
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_one.clone());
+            input_bits.push(assigned_one.clone());
+            input_bits.push(assigned_zero.clone());
+
+            // padding zero
+            for _ in 0..padding_len - 16 {
+                input_bits.push(assigned_zero.clone());
+            }
+
+            // padding 0x80
+            input_bits.push(assigned_one.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
+            input_bits.push(assigned_zero.clone());
             input_bits.push(assigned_zero.clone());
         }
-        input_bits.push(assigned_one.clone());
 
         for c in input_bits.chunks_exact(ABSORB_BITS_RATE) {
             self.absorb(&mut state, &c);
