@@ -4,9 +4,9 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 use std::marker::PhantomData;
 
-use crate::circuit::range_chip::COMMON_RANGE_BITS;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+use crate::gate::range_chip::COMMON_RANGE_BITS;
+use crate::gate::range_chip::RANGE_VALUE_DECOMPOSE;
+use crate::gate::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
 use crate::utils::bn_to_field;
 use crate::utils::field_to_bn;
 

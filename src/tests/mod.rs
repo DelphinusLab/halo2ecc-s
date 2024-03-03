@@ -17,11 +17,11 @@ use rand::{rngs::OsRng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
 use crate::{
-    circuit::{
+    context::{Context, Records},
+    gate::{
         base_chip::{BaseChip, BaseChipConfig},
         range_chip::{RangeChip, RangeChipConfig},
     },
-    context::{Context, Records},
 };
 
 pub mod base_chip;

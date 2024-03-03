@@ -1,6 +1,6 @@
-use crate::circuit::base_chip::BaseChipOps;
 use crate::circuit::integer_chip::IntegerChipOps;
 use crate::context::{Context, IntegerContext};
+use crate::gate::base_chip::BaseChipOps;
 use crate::tests::{random_bls12_381_fq, random_bls12_381_fr, random_fq, run_circuit_on_bn256};
 use crate::utils::field_to_bn;
 use halo2_proofs::arithmetic::Field;

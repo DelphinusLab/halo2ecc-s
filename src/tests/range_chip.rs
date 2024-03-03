@@ -1,6 +1,6 @@
-use crate::circuit::range_chip::RangeChipOps;
-use crate::circuit::range_chip::MAX_CHUNKS;
 use crate::context::{Context, IntegerContext};
+use crate::gate::range_chip::RangeChipOps;
+use crate::gate::range_chip::MAX_CHUNKS;
 use crate::tests::random_fq;
 use crate::tests::run_circuit_on_bn256;
 use crate::utils::field_to_bn;

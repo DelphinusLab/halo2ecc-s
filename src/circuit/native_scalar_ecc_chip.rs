@@ -3,7 +3,6 @@ use halo2_proofs::arithmetic::Field;
 use halo2_proofs::pairing::group::ff::PrimeField;
 use num_integer::Integer;
 
-use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
 use super::integer_chip::IntegerChipOps;
@@ -11,6 +10,7 @@ use crate::assign::AssignedCondition;
 use crate::assign::AssignedValue;
 use crate::circuit::ecc_chip::EccChipBaseOps;
 use crate::context::NativeScalarEccContext;
+use crate::gate::base_chip::BaseChipOps;
 use crate::pair;
 use crate::utils::bn_to_field;
 use crate::utils::field_to_bn;

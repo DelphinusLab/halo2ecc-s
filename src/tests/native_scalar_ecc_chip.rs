@@ -1,8 +1,8 @@
 use crate::assign::AssignedPoint;
-use crate::circuit::base_chip::BaseChipOps;
 use crate::circuit::ecc_chip::{EccChipBaseOps, EccChipScalarOps, UnsafeError};
 use crate::context::IntegerContext;
 use crate::context::{Context, NativeScalarEccContext};
+use crate::gate::base_chip::BaseChipOps;
 use crate::tests::{random_fr, run_circuit_on_bn256};
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::pairing::bn256::{Fr, G1Affine, G1};
@@ -74,7 +74,6 @@ fn test_native_ecc_chip() {
     run_circuit_on_bn256(final_ctx.unwrap().into(), 22);
 }
 
-
 #[test]
 fn test_native_ecc_chip_unsafe() {
     let mut points = vec![];
@@ -124,4 +123,3 @@ fn test_native_ecc_chip_unsafe() {
 
     run_circuit_on_bn256(final_ctx.unwrap().into(), 22);
 }
-

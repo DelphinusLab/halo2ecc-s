@@ -1,10 +1,10 @@
 use crate::assign::{AssignedCondition, AssignedG2Affine};
-use crate::circuit::base_chip::BaseChipOps;
 use crate::circuit::ecc_chip::EccChipBaseOps;
 use crate::circuit::fq12::{Fq12ChipOps, Fq2ChipOps};
 use crate::circuit::pairing_chip::PairingChipOps;
 use crate::context::IntegerContext;
 use crate::context::{Context, NativeScalarEccContext};
+use crate::gate::base_chip::BaseChipOps;
 use crate::tests::run_circuit_on_bn256;
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::pairing::bn256::pairing;

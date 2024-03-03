@@ -4,10 +4,10 @@ use halo2_proofs::arithmetic::{BaseExt, FieldExt};
 use num_bigint::BigUint;
 use num_integer::Integer;
 
-use super::{base_chip::BaseChipOps, range_chip::RangeChipOps};
 use crate::{
     assign::{AssignedCondition, AssignedInteger, AssignedValue},
     context::IntegerContext,
+    gate::{base_chip::BaseChipOps, range_chip::RangeChipOps},
     pair,
     utils::{bn_to_field, field_to_bn},
 };

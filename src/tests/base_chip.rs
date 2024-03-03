@@ -1,5 +1,5 @@
-use crate::circuit::base_chip::{BaseChipOps, MUL_COLUMNS, VAR_COLUMNS};
 use crate::context::Context;
+use crate::gate::base_chip::{BaseChipOps, MUL_COLUMNS, VAR_COLUMNS};
 use crate::pair;
 use crate::tests::{random_fr, run_circuit_on_bn256};
 use ark_std::{end_timer, start_timer};
