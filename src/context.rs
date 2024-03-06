@@ -132,11 +132,6 @@ pub struct Records<N: FieldExt> {
     pub range_fix_record: Vec<[Option<N>; RANGE_CHIP_FIX_COLUMNS]>,
     pub range_height: usize,
 
-    /* For picking point candidate from sum cache */
-    pub select_adv_record: Vec<[(Option<N>, bool); 2]>,
-    pub select_fix_record: Vec<[Option<N>; 2]>,
-    pub select_height: usize,
-
     pub permutations: Vec<(Cell, Cell)>,
 }
 
@@ -304,8 +299,7 @@ impl<N: FieldExt> Records<N> {
     ) -> Result<Option<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>>, Error> {
         let max_row = self
             .base_height
-            .max(self.range_height)
-            .max(self.select_height);
+            .max(self.range_height);
         let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
         if !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
@@ -335,7 +329,6 @@ impl<N: FieldExt> Records<N> {
         match cell.region {
             Chip::BaseChip => self.base_adv_record[cell.row][cell.col].1 = true,
             Chip::RangeChip => self.range_adv_record[cell.row][cell.col].1 = true,
-            Chip::SelectChip => self.select_adv_record[cell.row][cell.col].1 = true,
         }
     }
 
@@ -435,60 +428,6 @@ impl<N: FieldExt> Records<N> {
         if offset >= self.range_height {
             self.range_height = offset + 1;
         }
-    }
-
-    pub fn assign_cache_value(&mut self, offset: usize, v: &AssignedValue<N>, encode: N) {
-        //println!("Cache [offset, v, encode] {:?} {:?} {:?}", offset, v.val, encode);
-        if offset >= self.select_fix_record.len() {
-            self.select_adv_record.resize(1 << 20, [(None, false); 2]);
-            self.select_fix_record.resize(1 << 20, [None; 2]);
-        }
-
-        if offset >= self.select_height {
-            self.select_height = offset + 1;
-        }
-
-        assert!(offset < 1 << 20);
-
-        self.select_adv_record[offset][0].0 = Some(v.val);
-        let idx = Cell::new(Chip::SelectChip, 0, offset);
-        self.permutations.push((idx, v.cell));
-        self.enable_permute(&idx);
-        self.enable_permute(&v.cell);
-        // assign encode
-        self.select_fix_record[offset][0] = Some(encode);
-        self.select_fix_record[offset][1] = Some(N::zero());
-    }
-
-    pub fn assign_select_value(
-        &mut self,
-        offset: usize,
-        v: &AssignedValue<N>,
-        encode: N,
-        selector: &AssignedValue<N>,
-    ) -> AssignedValue<N> {
-        //println!("Select [offset, v, encode, value] {:?} {:?} {:?} {:?}", offset, v.val, encode, selector.val);
-        if offset >= self.select_fix_record.len() {
-            self.select_adv_record.resize(1 << 20, [(None, false); 2]);
-            self.select_fix_record.resize(1 << 20, [None; 2]);
-        }
-
-        if offset >= self.select_height {
-            self.select_height = offset + 1;
-        }
-
-        assert!(offset < 1 << 20);
-
-        self.select_adv_record[offset][0].0 = Some(v.val);
-        self.select_adv_record[offset][1].0 = Some(selector.val);
-        let selector_cell = Cell::new(Chip::SelectChip, 1, offset);
-        self.permutations.push((selector_cell, selector.cell));
-        self.enable_permute(&selector_cell);
-        self.enable_permute(&selector.cell);
-        self.select_fix_record[offset][0] = Some(encode);
-        self.select_fix_record[offset][1] = Some(N::one());
-
-        AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
     }
 
     pub fn assign_one_line_range_value(
