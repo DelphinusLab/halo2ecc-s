@@ -20,6 +20,9 @@ pub struct RangeInfo<W: BaseExt, N: FieldExt> {
     pub d_leading_decompose: u64,
 
     pub w_ceil_bits: u64,
+    pub d_bits: u64,
+    pub n_floor_bits: u64,
+
     pub d_leading_bits: u64,
     pub w_ceil_leading_bits: u64,
     pub n_floor_leading_bits: u64,
@@ -110,7 +113,10 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
         let w_modulus_of_ceil_times = vec![None; overflow_limit as usize];
 
         let mut res = Self {
+            d_bits,
             w_ceil_bits,
+            n_floor_bits,
+
             d_leading_bits,
             w_ceil_leading_bits,
             n_floor_leading_bits,

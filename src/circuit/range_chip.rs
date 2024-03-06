@@ -26,7 +26,7 @@ pub const COMMON_RANGE_BITS: u64 = MAX_BITS as u64;
 pub const RANGE_CHIP_RANGE_COLUMNS: usize = 2;
 pub const RANGE_CHIP_COMMON_RANGE_COLUMNS: usize = RANGE_CHIP_RANGE_COLUMNS - 1;
 pub const RANGE_CHIP_ADV_COLUMNS: usize = RANGE_CHIP_RANGE_COLUMNS + 1;
-pub const RANGE_CHIP_FIX_COLUMNS: usize = 3;
+pub const RANGE_CHIP_FIX_COLUMNS: usize = 2;
 
 pub const RANGE_VALUE_DECOMPOSE: u64 = MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS as u64;
 pub const RANGE_VALUE_DECOMPOSE_COMMON_PARTS: u64 =
@@ -35,10 +35,10 @@ pub const RANGE_VALUE_DECOMPOSE_COMMON_PARTS: u64 =
 /*
  *  Range chip is used to assigned range constrained cell.
  *
- *  | short acc sel (fixed) | full acc sel (fixed) | acc value | tag (fixed) | tagged range | common range |
- *  |    is_short_acc       |     is_full_acc      |    acc    |     tag3    |      v3      |      v0      |
- *  |                       |                      |           |     tag4    |      v4      |      v1      |
- *  |                       |                      |           |     tag5    |      v5      |      v2      |
+ *  | acc lines (fixed) | acc value | tag (fixed) | tagged range | common range |
+ *  |     acc_lines     |    acc    |     tag3    |      v3      |      v0      |
+ *  |                   |           |     tag4    |      v4      |      v1      |
+ *  |                   |           |     tag5    |      v5      |      v2      |
  *
  *  lookup constraints:
  *  v0, v1, v2 is in range (0..common_range)
@@ -55,22 +55,14 @@ pub const RANGE_VALUE_DECOMPOSE_COMMON_PARTS: u64 =
  *  (COMMON_RANGE_BITS, 0), (COMMON_RANGE_BITS, 1), ..., (COMMON_RANGE_BITS, (1 << COMMON_RANGE_BITS) - 1)
  *
  *  accumulate constraints:
- *  (short accumulate mode works only on tagged range col)
- *  is_short_acc = 1 -> acc = v3 + v4 * common_range + v5 * common_range ^ 2
+ *  acc_lines = 1 -> acc = v3
+ *  acc_lines = 2 -> acc = v0 + v1 * common_range ^ 1 + v3 * common_range ^ 2 + v4 * common_range ^ 3
+ *  acc_lines = 3 -> acc = v0 + v1 * common_range ^ 1 + v2 * common_range ^ 2 + v3 * common_range ^ 3
+ *                            + v4 * common_range ^ 4 + v5 * common_range ^ 5
  *
- *  (full accumulate mode works on all range col)
- *  is_full_acc  = 1 -> acc = v0 + v1 * common_range + v2 * common_range ^ 2 + v3 * common_range ^ 3 + v4 * common_range ^ 4 + v5 * common_range ^ 5
- *
- *  To constraint a in max_a_bits:
- *  If max_a_bits <= COMMON_RANGE_BITS, allocate one row with (tag = max_a_bits, tag_value = a)
- *  If max_a_bits > COMMON_RANGE_BITS, allocate MAX_CHUNKS rows with accumulate mode.
- *
- *  short accumulate mode allows bits in
- *     max_a_bits <= MAX_CHUNKS * COMMON_RANGE_BITS]
- *  
- *  full accumulate mode allows bits in
- *     max_a_bits >= MAX_CHUNKS * RANGE_CHIP_COMMON_RANGE_COLUMNS * COMMON_RANGE_BITS
- *  && max_a_bits <= MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS * COMMON_RANGE_BITS
+ *  acc_lines = 1 can limit range in [0, common_range)
+ *  acc_lines = 2 can limit range in [common_range ^ 2 - 1, common_range ^ 4)
+ *  acc_lines = 3 can limit range in [common_range ^ 3 - 1, common_range ^ 6)
  */
 #[derive(Clone, Debug)]
 pub struct RangeChipConfig {
@@ -89,13 +81,12 @@ pub struct RangeChip<N: FieldExt> {
 pub enum RangeAdvColIndex {
     ValueAccCol = 0,
     TaggedRangeCol = 1,
-    CommonRangeColStart = 2,
+    CommonRangeCol = 2,
 }
 
 pub enum RangeFixColIndex {
-    FullValueAccSelCol = 0,
-    ShortValueAccSelCol = 1,
-    TagCol = 2,
+    AccLinesCol = 0,
+    TagCol = 1,
 }
 
 impl<N: FieldExt> RangeChip<N> {
@@ -115,15 +106,13 @@ impl<N: FieldExt> RangeChip<N> {
         let range_value_table_column = meta.lookup_table_column();
 
         let tag = fix_cols[RangeFixColIndex::TagCol as usize];
-        let full_value_acc_sel = fix_cols[RangeFixColIndex::FullValueAccSelCol as usize];
-        let short_value_acc_sel = fix_cols[RangeFixColIndex::ShortValueAccSelCol as usize];
+        let acc_lines = fix_cols[RangeFixColIndex::AccLinesCol as usize];
 
         let value_acc = adv_cols[RangeAdvColIndex::ValueAccCol as usize];
         let tagged_range_col = adv_cols[RangeAdvColIndex::TaggedRangeCol as usize];
-        let common_range_cols = &adv_cols[RangeAdvColIndex::CommonRangeColStart as usize..];
+        let common_range_col = adv_cols[RangeAdvColIndex::CommonRangeCol as usize];
 
         meta.enable_equality(value_acc);
-        meta.enable_equality(adv_cols[RangeAdvColIndex::TaggedRangeCol as usize]);
 
         meta.lookup("tag range check", |meta| {
             let tag = meta.query_fixed(tag, Rotation::cur());
@@ -134,67 +123,98 @@ impl<N: FieldExt> RangeChip<N> {
                 (value, range_value_table_column),
             ]
         });
-
-        for col in common_range_cols {
-            meta.lookup("common range check", |meta| {
-                let value = meta.query_advice(*col, Rotation::cur());
-                vec![
-                    (
-                        Expression::Constant(N::from(COMMON_RANGE_BITS)),
-                        range_tag_table_column,
-                    ),
-                    (value, range_value_table_column),
-                ]
-            });
-        }
-
-        meta.create_gate("full acc value check", |meta| {
-            let value_acc_sel = meta.query_fixed(full_value_acc_sel, Rotation::cur());
-            let value_acc = meta.query_advice(value_acc, Rotation::cur());
-            let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);
-
-            let mut acc = None;
-            for col in common_range_cols
-                .iter()
-                .chain(vec![tagged_range_col].iter())
-            {
-                for row in 0..MAX_CHUNKS as i32 {
-                    let c = meta.query_advice(*col, Rotation(row));
-                    if let Some((value_acc, shift_acc)) = acc {
-                        acc = Some((
-                            value_acc + c * Expression::Constant(shift_acc),
-                            shift_acc * &shift_unit,
-                        ))
-                    } else {
-                        acc = Some((c, shift_unit))
-                    }
-                }
-            }
-
-            vec![value_acc_sel * (acc.unwrap().0 - value_acc)]
+        meta.lookup("common range check", |meta| {
+            let value = meta.query_advice(common_range_col, Rotation::cur());
+            vec![
+                (
+                    Expression::Constant(N::from(COMMON_RANGE_BITS)),
+                    range_tag_table_column,
+                ),
+                (value, range_value_table_column),
+            ]
         });
 
-        meta.create_gate("short acc value check", |meta| {
-            let value_acc_sel = meta.query_fixed(short_value_acc_sel, Rotation::cur());
+        assert!(RANGE_CHIP_RANGE_COLUMNS == 2);
+
+        meta.create_gate("acc value check one line", |meta| {
+            let acc_lines = meta.query_fixed(acc_lines, Rotation::cur());
+            let value_acc = meta.query_advice(value_acc, Rotation::cur());
+
+            let mut acc = value_acc.clone();
+            let v = meta.query_advice(tagged_range_col, Rotation(0 as i32));
+            acc = acc - v;
+
+            acc = acc * acc_lines.clone();
+            for root in 1..=3 {
+                if root != 1 {
+                    acc = acc * (acc_lines.clone() - Expression::Constant(N::from(root as u64)));
+                }
+            }
+            vec![acc]
+        });
+
+        meta.create_gate("acc value check two lines", |meta| {
+            let acc_lines = meta.query_fixed(acc_lines, Rotation::cur());
             let value_acc = meta.query_advice(value_acc, Rotation::cur());
             let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);
 
-            let mut acc = None;
-            let col = &tagged_range_col;
+            assert!(RANGE_CHIP_RANGE_COLUMNS == 2);
 
-            for row in 0..MAX_CHUNKS as i32 {
-                let c = meta.query_advice(*col, Rotation(row));
-                if let Some((value_acc, shift_acc)) = acc {
-                    acc = Some((
-                        value_acc + c * Expression::Constant(shift_acc),
-                        shift_acc * &shift_unit,
-                    ))
-                } else {
-                    acc = Some((c, shift_unit))
+            let mut acc = value_acc.clone();
+            let mut shift = N::one();
+
+            for j in 0..2 {
+                let v = meta.query_advice(common_range_col, Rotation(j as i32));
+                acc = acc - v * Expression::Constant(shift);
+                shift = shift * shift_unit;
+            }
+
+            for j in 0..2 {
+                let v = meta.query_advice(tagged_range_col, Rotation(j as i32));
+                acc = acc - v * Expression::Constant(shift);
+                shift = shift * shift_unit;
+            }
+
+            acc = acc * acc_lines.clone();
+            for root in 1..=3 {
+                if root != 2 {
+                    acc = acc * (acc_lines.clone() - Expression::Constant(N::from(root as u64)));
                 }
             }
 
-            vec![value_acc_sel * (acc.unwrap().0 - value_acc)]
+            vec![acc]
+        });
+
+        meta.create_gate("acc value check three lines", |meta| {
+            let acc_lines = meta.query_fixed(acc_lines, Rotation::cur());
+            let value_acc = meta.query_advice(value_acc, Rotation::cur());
+            let shift_unit = N::from(1u64 << COMMON_RANGE_BITS);
+
+            assert!(RANGE_CHIP_RANGE_COLUMNS == 2);
+
+            let mut acc = value_acc.clone();
+            let mut shift = N::one();
+
+            for j in 0..3 {
+                let v = meta.query_advice(common_range_col, Rotation(j as i32));
+                acc = acc - v * Expression::Constant(shift);
+                shift = shift * shift_unit;
+            }
+
+            for j in 0..3 {
+                let v = meta.query_advice(tagged_range_col, Rotation(j as i32));
+                acc = acc - v * Expression::Constant(shift);
+                shift = shift * shift_unit;
+            }
+
+            acc = acc * acc_lines.clone();
+            for root in 1..=3 {
+                if root != 3 {
+                    acc = acc * (acc_lines.clone() - Expression::Constant(N::from(root as u64)));
+                }
+            }
+
+            vec![acc]
         });
 
         RangeChipConfig {
@@ -242,7 +262,6 @@ pub trait RangeChipOps<W: BaseExt, N: FieldExt> {
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N>;
     fn assign_nonleading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
     fn assign_w_ceil_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
-    fn assign_n_floor_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
     fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
 }
 
@@ -264,11 +283,13 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
     }
 
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let v = bn_to_field(bn);
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_single_range_value(
+        let res = records.assign_one_line_range_value(
             self.ctx.borrow_mut().range_offset,
-            bn_to_field(bn),
+            &[v][..],
+            v,
             COMMON_RANGE_BITS,
         );
         self.ctx.borrow_mut().range_offset += 1;
@@ -276,6 +297,7 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
     }
 
     fn assign_nonleading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
+        let info = self.info();
         let v = decompose_bn(
             bn,
             MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS as u64,
@@ -283,12 +305,13 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
         );
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_acc_range_value(
+        let (res, offset_increase) = records.assign_range_value(
             self.ctx.borrow_mut().range_offset,
-            v,
-            COMMON_RANGE_BITS,
+            v.1,
+            v.0,
+            info.limb_bits,
         );
-        self.ctx.borrow_mut().range_offset += MAX_CHUNKS as usize;
+        self.ctx.borrow_mut().range_offset += offset_increase as usize;
         res
     }
 
@@ -301,30 +324,13 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
         );
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_acc_range_value(
+        let (res, offset_increase) = records.assign_range_value(
             self.ctx.borrow_mut().range_offset,
-            v,
-            info.w_ceil_leading_bits,
+            v.1,
+            v.0,
+            info.w_ceil_bits % info.limb_bits,
         );
-        self.ctx.borrow_mut().range_offset += MAX_CHUNKS as usize;
-        res
-    }
-
-    fn assign_n_floor_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
-        let info = self.info();
-        let v = decompose_bn(
-            bn,
-            self.info().n_floor_leading_decompose,
-            &info.common_range_mask,
-        );
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_acc_range_value(
-            self.ctx.borrow_mut().range_offset,
-            v,
-            info.n_floor_leading_bits,
-        );
-        self.ctx.borrow_mut().range_offset += MAX_CHUNKS as usize;
+        self.ctx.borrow_mut().range_offset += offset_increase as usize;
         res
     }
 
@@ -333,12 +339,13 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
         let v = decompose_bn(bn, self.info().d_leading_decompose, &info.common_range_mask);
         let records_mtx = self.ctx.borrow().records.clone();
         let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_acc_range_value(
+        let (res, offset_increase) = records.assign_range_value(
             self.ctx.borrow_mut().range_offset,
-            v,
-            info.d_leading_bits,
+            v.1,
+            v.0,
+            info.d_bits % info.limb_bits,
         );
-        self.ctx.borrow_mut().range_offset += MAX_CHUNKS as usize;
+        self.ctx.borrow_mut().range_offset += offset_increase as usize;
         res
     }
 }

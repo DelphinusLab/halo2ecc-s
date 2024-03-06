@@ -16,7 +16,6 @@ use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
 use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
-use crate::circuit::select_chip::SelectChip;
 use crate::range_info::RangeInfo;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::arithmetic::CurveAffine;
@@ -596,125 +595,152 @@ impl<N: FieldExt> Records<N> {
         AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
     }
 
-    pub fn assign_single_range_value(
+    pub fn assign_one_line_range_value(
         &mut self,
         offset: usize,
-        v: N,
-        leading_bits: u64,
+        v: &[N],
+        v_acc: N,
+        bits: u64,
     ) -> AssignedValue<N> {
+        //println!("bits is {}", bits);
+        assert!(bits <= COMMON_RANGE_BITS);
         self.ensure_range_record_size(offset + 1);
 
-        self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] =
-            Some(N::from(leading_bits));
-        self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v);
+        self.range_fix_record[offset][RangeFixColIndex::AccLinesCol as usize] = Some(N::one());
+        self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] = Some(N::from(bits));
+        self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v[0]);
 
-        AssignedValue::new(
-            Chip::RangeChip,
-            RangeAdvColIndex::TaggedRangeCol as usize,
-            offset,
-            v,
-        )
-    }
-
-    fn assign_full_acc_range_value(
-        &mut self,
-        offset: usize,
-        (v, decompose_v): (N, Vec<N>),
-        leading_bits: u64,
-    ) -> AssignedValue<N> {
-        assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
-        assert!(
-            decompose_v.len() as u64 > RANGE_VALUE_DECOMPOSE_COMMON_PARTS
-                || leading_bits == COMMON_RANGE_BITS
-        );
-
-        self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
-
-        self.range_fix_record[offset][RangeFixColIndex::FullValueAccSelCol as usize] =
-            Some(N::one());
-        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
-
-        for (index, v) in decompose_v.iter().enumerate() {
-            let col_index_raw = index / MAX_CHUNKS as usize;
-            let row_offset = index % MAX_CHUNKS as usize;
-
-            let col = if col_index_raw < RANGE_CHIP_COMMON_RANGE_COLUMNS {
-                RangeAdvColIndex::CommonRangeColStart as usize + col_index_raw
-            } else {
-                self.range_fix_record[offset + row_offset][RangeFixColIndex::TagCol as usize] =
-                    if index != decompose_v.len() - 1 {
-                        Some(N::from(COMMON_RANGE_BITS as u64))
-                    } else {
-                        Some(N::from(leading_bits))
-                    };
-                RangeAdvColIndex::TaggedRangeCol as usize
-            };
-
-            self.range_adv_record[offset + row_offset][col].0 = Some(*v);
-        }
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v_acc);
 
         AssignedValue::new(
             Chip::RangeChip,
             RangeAdvColIndex::ValueAccCol as usize,
             offset,
-            v,
+            v_acc,
         )
     }
 
-    fn assign_short_acc_range_value(
+    pub fn assign_two_line_range_value(
         &mut self,
         offset: usize,
-        (v, decompose_v): (N, Vec<N>),
-        leading_bits: u64,
+        v: &[N],
+        v_acc: N,
+        bits: u64,
     ) -> AssignedValue<N> {
-        assert!(decompose_v.len() as u64 <= MAX_CHUNKS);
+        assert!(bits >= COMMON_RANGE_BITS * 2);
+        assert!(bits <= COMMON_RANGE_BITS * 4);
+        self.ensure_range_record_size(offset + 2);
 
-        self.ensure_range_record_size(offset + MAX_CHUNKS as usize);
+        self.range_fix_record[offset][RangeFixColIndex::AccLinesCol as usize] =
+            Some(N::one() + N::one());
 
-        self.range_fix_record[offset][RangeFixColIndex::ShortValueAccSelCol as usize] =
-            Some(N::one());
-        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v);
+        self.range_adv_record[offset][RangeAdvColIndex::CommonRangeCol as usize].0 = Some(v[0]);
+        self.range_adv_record[offset + 1][RangeAdvColIndex::CommonRangeCol as usize].0 = Some(v[1]);
 
-        for (index, v) in decompose_v.iter().enumerate() {
-            self.range_fix_record[offset + index][RangeFixColIndex::TagCol as usize] =
-                if index != decompose_v.len() - 1 {
-                    Some(N::from(COMMON_RANGE_BITS as u64))
-                } else {
-                    Some(N::from(leading_bits))
-                };
-
-            self.range_adv_record[offset + index][RangeAdvColIndex::TaggedRangeCol as usize].0 =
-                Some(*v);
-        }
-
-        AssignedValue::new(
-            Chip::RangeChip,
-            RangeAdvColIndex::ValueAccCol as usize,
-            offset,
-            v,
-        )
-    }
-
-    pub fn assign_acc_range_value(
-        &mut self,
-        offset: usize,
-        (v, decompose_v): (N, Vec<N>),
-        leading_bits: u64,
-    ) -> AssignedValue<N> {
-        assert!(decompose_v.len() as u64 <= RANGE_VALUE_DECOMPOSE);
-        if (leading_bits == COMMON_RANGE_BITS
-            && decompose_v.len() == RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize)
-            || decompose_v.len() > RANGE_VALUE_DECOMPOSE_COMMON_PARTS as usize
-        {
-            self.assign_full_acc_range_value(offset, (v, decompose_v), leading_bits)
-        } else if decompose_v.len() <= MAX_CHUNKS as usize {
-            self.assign_short_acc_range_value(offset, (v, decompose_v), leading_bits)
+        let cell_bits = if bits >= 3 * COMMON_RANGE_BITS {
+            COMMON_RANGE_BITS
         } else {
-            eprintln!(
-                "attempt to assign unsupported range value, len: {}, leading bits: {}",
-                decompose_v.len(),
-                leading_bits
-            );
+            bits % COMMON_RANGE_BITS
+        };
+        self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
+        self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v[2]);
+
+        let cell_bits = if bits > 3 * COMMON_RANGE_BITS {
+            bits - 3 * COMMON_RANGE_BITS
+        } else {
+            0
+        };
+        self.range_fix_record[offset + 1][RangeFixColIndex::TagCol as usize] =
+            Some(N::from(cell_bits));
+        self.range_adv_record[offset + 1][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v[3]);
+
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v_acc);
+
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::ValueAccCol as usize,
+            offset,
+            v_acc,
+        )
+    }
+
+    pub fn assign_three_line_range_value(
+        &mut self,
+        offset: usize,
+        v: &[N],
+        v_acc: N,
+        bits: u64,
+    ) -> AssignedValue<N> {
+        assert!(bits >= COMMON_RANGE_BITS * 3);
+        assert!(bits <= COMMON_RANGE_BITS * 6);
+        self.ensure_range_record_size(offset + 3);
+
+        self.range_fix_record[offset][RangeFixColIndex::AccLinesCol as usize] =
+            Some(N::one() + N::one() + N::one());
+
+        self.range_adv_record[offset][RangeAdvColIndex::CommonRangeCol as usize].0 = Some(v[0]);
+        self.range_adv_record[offset + 1][RangeAdvColIndex::CommonRangeCol as usize].0 = Some(v[1]);
+        self.range_adv_record[offset + 2][RangeAdvColIndex::CommonRangeCol as usize].0 = Some(v[2]);
+
+        let cell_bits = if bits >= 4 * COMMON_RANGE_BITS {
+            COMMON_RANGE_BITS
+        } else {
+            bits % COMMON_RANGE_BITS
+        };
+        self.range_fix_record[offset][RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
+        self.range_adv_record[offset][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v[3]);
+
+        let cell_bits = if bits >= 5 * COMMON_RANGE_BITS {
+            COMMON_RANGE_BITS
+        } else if bits > 4 * COMMON_RANGE_BITS {
+            bits % COMMON_RANGE_BITS
+        } else {
+            0
+        };
+        self.range_fix_record[offset + 1][RangeFixColIndex::TagCol as usize] =
+            Some(N::from(cell_bits));
+        self.range_adv_record[offset + 1][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v[4]);
+
+        let cell_bits = if bits > 5 * COMMON_RANGE_BITS {
+            bits - 5 * COMMON_RANGE_BITS
+        } else {
+            0
+        };
+        self.range_fix_record[offset + 2][RangeFixColIndex::TagCol as usize] =
+            Some(N::from(cell_bits));
+        self.range_adv_record[offset + 2][RangeAdvColIndex::TaggedRangeCol as usize].0 = Some(v[5]);
+
+        self.range_adv_record[offset][RangeAdvColIndex::ValueAccCol as usize].0 = Some(v_acc);
+
+        AssignedValue::new(
+            Chip::RangeChip,
+            RangeAdvColIndex::ValueAccCol as usize,
+            offset,
+            v_acc,
+        )
+    }
+
+    pub fn assign_range_value(
+        &mut self,
+        offset: usize,
+        mut v: Vec<N>,
+        v_acc: N,
+        bits: u64,
+    ) -> (AssignedValue<N>, usize) {
+        if bits <= COMMON_RANGE_BITS {
+            let assigned = self.assign_one_line_range_value(offset, &v[..], v_acc, bits);
+            (assigned, 1)
+        } else if bits <= 2 * COMMON_RANGE_BITS {
+            unreachable!()
+        } else if bits <= 4 * COMMON_RANGE_BITS {
+            v.resize(4, N::zero());
+            let assigned = self.assign_two_line_range_value(offset, &v[..], v_acc, bits);
+            (assigned, 2)
+        } else if bits <= 6 * COMMON_RANGE_BITS {
+            v.resize(6, N::zero());
+            let assigned = self.assign_three_line_range_value(offset, &v[..], v_acc, bits);
+            (assigned, 3)
+        } else {
             unreachable!()
         }
     }
