@@ -489,6 +489,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.1.0-beta.1"
+source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git?branch=zhangjunyu/para-synthesize#a382f2d261a0c1279df03944ec06c0953254e564"
 dependencies = [
  "ark-std",
  "blake2b_simd",
