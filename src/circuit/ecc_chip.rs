@@ -183,7 +183,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         scalars: &Vec<Self::AssignedScalar>,
         rand_acc_point: C::Curve,
         rand_line_point: C::Curve,
-    ) -> Result<AssignedNonZeroPoint<C, N>, UnsafeError> {
+    ) -> Result<AssignedPoint<C, N>, UnsafeError> {
         let rand_acc_point = self.assign_non_zero_point(&rand_acc_point);
         let rand_line_point = self.assign_non_zero_point(&rand_line_point);
 
@@ -244,7 +244,11 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             }
         }
 
-        self.ecc_add_unsafe(&acc, &rand_acc_point_neg)
+        let acc = self.ecc_non_zero_point_downgrade(&acc);
+        let acc = self.to_point_with_curvature(acc);
+        let rand_acc_point_neg = self.ecc_non_zero_point_downgrade(&rand_acc_point_neg);
+
+        Ok(self.ecc_add(&acc, &rand_acc_point_neg))
     }
 
     fn msm(
@@ -279,7 +283,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             normalized_scalars.push(s);
         }
         let p = self.msm_batch_on_group_unsafe(&non_zero_points, &normalized_scalars, r1, r2)?;
-        Ok(self.ecc_non_zero_point_downgrade(&p))
+        Ok(p)
     }
 
     fn ecc_mul(&mut self, a: &AssignedPoint<C, N>, s: Self::AssignedScalar) -> AssignedPoint<C, N> {
