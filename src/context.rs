@@ -385,7 +385,7 @@ impl<N: FieldExt> Records<N> {
             .max(self.range_height)
             .max(self.select_height);
         let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
-        if !is_assign_for_max_row {
+        if true || !is_assign_for_max_row {
             let base_cells = self._assign_to_base_chip(region, base_chip)?;
             let range_cells = self._assign_to_range_chip(region, range_chip)?;
             let select_cells = self._assign_to_select_chip(region, select_chip)?;
