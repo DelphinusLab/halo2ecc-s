@@ -399,7 +399,7 @@ impl<N: FieldExt> Records<N> {
 
     pub fn assign_all_with_optional_select_chip(
         &self,
-        region: &mut Region<'_, N>,
+        region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
         range_chip: &RangeChip<N>,
         select_chip: Option<&SelectChip<N>>,
