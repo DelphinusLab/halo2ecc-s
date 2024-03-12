@@ -10,13 +10,11 @@ use crate::circuit::range_chip::RangeAdvColIndex;
 use crate::circuit::range_chip::RangeChip;
 use crate::circuit::range_chip::RangeFixColIndex;
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
-use crate::circuit::range_chip::MAX_CHUNKS;
 use crate::circuit::range_chip::RANGE_CHIP_ADV_COLUMNS;
-use crate::circuit::range_chip::RANGE_CHIP_COMMON_RANGE_COLUMNS;
 use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+use crate::circuit::select_chip::SelectChip;
 use crate::range_info::RangeInfo;
+
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::arithmetic::FieldExt;
