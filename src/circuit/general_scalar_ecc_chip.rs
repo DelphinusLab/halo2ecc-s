@@ -5,6 +5,7 @@ use halo2_proofs::arithmetic::FieldExt;
 use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
+use super::ecc_chip::MSM_LIMIT;
 use super::ecc_chip::MSM_PREFIX_OFFSET;
 use super::integer_chip::IntegerChipOps;
 use super::select_chip::SelectChipOps;
@@ -23,6 +24,9 @@ impl<C: CurveAffine, N: FieldExt> EccBaseIntegerChipWrapper<C::Base, N>
     }
     fn select_chip(&mut self) -> &mut dyn SelectChipOps<C::Base, N> {
         &mut self.base_integer_ctx
+    }
+    fn has_select_chip(&self) -> bool {
+        true
     }
 }
 
@@ -85,6 +89,7 @@ impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccCon
 
     fn get_and_increase_msm_prefix(&mut self) -> usize {
         let ret = self.msm_prefix;
+        assert!(ret < MSM_LIMIT);
         self.msm_prefix += MSM_PREFIX_OFFSET;
         ret
     }

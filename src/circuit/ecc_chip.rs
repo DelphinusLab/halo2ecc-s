@@ -14,6 +14,7 @@ use crate::assign::{AssignedCondition, AssignedCurvature, AssignedInteger, Assig
 use crate::assign::{AssignedPointWithCurvature, AssignedValue};
 use crate::utils::{bn_to_field, field_to_bn};
 
+pub const MSM_LIMIT: usize = (1 << 8) * MSM_PREFIX_OFFSET;
 pub const MSM_PREFIX_OFFSET: usize = 1 << 20;
 
 pub enum UnsafeError {
@@ -194,19 +195,93 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         acc.unwrap()
     }
 
-    fn msm_batch_on_group_unsafe(
+    fn msm_batch_on_group_non_zero_without_select_chip(
         &mut self,
         points: &Vec<AssignedNonZeroPoint<C, N>>,
         scalars: &Vec<Self::AssignedScalar>,
         rand_acc_point: C::Curve,
         rand_line_point: C::Curve,
-    ) -> Result<AssignedNonZeroPoint<C, N>, UnsafeError> {
-        assert!(points.len() <= MSM_PREFIX_OFFSET);
-        let rand_acc_point = self.assign_nonzero_point(&rand_acc_point);
-        let rand_line_point = self.assign_nonzero_point(&rand_line_point);
+    ) -> Result<AssignedPoint<C, N>, UnsafeError> {
+        let rand_acc_point = self.assign_non_zero_point(&rand_acc_point);
+        let rand_line_point = self.assign_non_zero_point(&rand_line_point);
 
-        let rand_acc_point_neg = self.ecc_neg_unsafe(&rand_acc_point);
-        let rand_line_point_neg = self.ecc_neg_unsafe(&rand_line_point);
+        let rand_acc_point_neg = self.ecc_neg_non_zero(&rand_acc_point);
+        let rand_line_point_neg = self.ecc_neg_non_zero(&rand_line_point);
+
+        let best_group_size = 3;
+        let n_group = (points.len() + best_group_size - 1) / best_group_size;
+        let group_size = (points.len() + n_group - 1) / n_group;
+
+        let mut candidates = vec![];
+
+        for (group_index, chunk) in points.chunks(group_size).enumerate() {
+            let init = if group_index.is_even() {
+                &rand_line_point
+            } else {
+                &rand_line_point_neg
+            };
+
+            candidates.push(vec![init.clone()]);
+
+            let cl = candidates.last_mut().unwrap();
+            for i in 1..1u32 << chunk.len() {
+                let pos = i.reverse_bits().leading_zeros(); // find the last bit-1 position
+                let other = i - (1 << pos);
+                let p = self.ecc_add_unsafe(&cl[other as usize], &chunk[pos as usize])?;
+                cl.push(p);
+            }
+        }
+
+        let bits = scalars
+            .into_iter()
+            .map(|s| self.decompose_scalar::<1>(s))
+            .collect::<Vec<Vec<[AssignedCondition<_>; 1]>>>();
+
+        let groups = bits.chunks(group_size).collect::<Vec<_>>();
+
+        let mut acc = rand_acc_point.clone();
+
+        let line_acc_arr = (0..bits[0].len())
+            .map(|wi| -> Result<_, _> {
+                let mut line_acc = rand_acc_point_neg.clone();
+                for group_index in 0..groups.len() {
+                    let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
+                    let ci = self.bisec_candidate_non_zero(&candidates[group_index], &group_bits);
+
+                    line_acc = self.ecc_add_unsafe(&ci, &line_acc)?;
+                }
+                Ok(line_acc)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for wi in 0..bits[0].len() {
+            acc = self.ecc_double_unsafe(&acc)?;
+            acc = self.ecc_add_unsafe(&line_acc_arr[wi], &acc)?;
+            if groups.len().is_odd() {
+                acc = self.ecc_add_unsafe(&acc, &rand_line_point_neg)?;
+            }
+        }
+
+        let acc = self.ecc_non_zero_point_downgrade(&acc);
+        let acc = self.to_point_with_curvature(acc);
+        let rand_acc_point_neg = self.ecc_non_zero_point_downgrade(&rand_acc_point_neg);
+
+        Ok(self.ecc_add(&acc, &rand_acc_point_neg))
+    }
+
+    fn msm_batch_on_group_non_zero_with_select_chip(
+        &mut self,
+        points: &Vec<AssignedNonZeroPoint<C, N>>,
+        scalars: &Vec<Self::AssignedScalar>,
+        rand_acc_point: C::Curve,
+        rand_line_point: C::Curve,
+    ) -> Result<AssignedPoint<C, N>, UnsafeError> {
+        assert!(points.len() <= MSM_PREFIX_OFFSET);
+        let rand_acc_point = self.assign_non_zero_point(&rand_acc_point);
+        let rand_line_point = self.assign_non_zero_point(&rand_line_point);
+
+        let rand_acc_point_neg = self.ecc_neg_non_zero(&rand_acc_point);
+        let rand_line_point_neg = self.ecc_neg_non_zero(&rand_line_point);
 
         let best_group_size = 5;
         let n_group = (points.len() + best_group_size - 1) / best_group_size;
@@ -223,15 +298,15 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             };
 
             candidates.push(vec![init.clone()]);
-            self.assign_cache_point_unsafe(&init, group_prefix + group_index, 0 as usize);
+            self.assign_cache_point_non_zero(&init, group_prefix + group_index, 0 as usize);
 
             let cl = candidates.last_mut().unwrap();
             for i in 1..1u32 << chunk.len() {
                 let pos = i.reverse_bits().leading_zeros(); // find the last bit-1 position
                 let other = i - (1 << pos);
                 let p = self.ecc_add_unsafe(&cl[other as usize], &chunk[pos as usize])?;
-                let p = self.ecc_reduce_unsafe(&p);
-                self.assign_cache_point_unsafe(&p, group_prefix + group_index, i as usize);
+                let p = self.ecc_reduce_non_zero(&p);
+                self.assign_cache_point_non_zero(&p, group_prefix + group_index, i as usize);
                 cl.push(p);
             }
         }
@@ -253,9 +328,12 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             for group_index in 0..groups.len() {
                 let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
                 let (index_cell, ci) =
-                    self.pick_candidate_unsafe(&candidates[group_index], &group_bits);
-                let ci =
-                    self.assign_selected_point_unsafe(&ci, &index_cell, group_index + group_prefix);
+                    self.pick_candidate_non_zero(&candidates[group_index], &group_bits);
+                let ci = self.assign_selected_point_non_zero(
+                    &ci,
+                    &index_cell,
+                    group_index + group_prefix,
+                );
 
                 acc = self.ecc_add_unsafe(&ci, &acc)?;
             }
@@ -265,7 +343,10 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
             }
         }
 
-        self.ecc_add_unsafe(&acc, &carry)
+        let acc = self.ecc_non_zero_point_downgrade(&acc);
+        let acc = self.to_point_with_curvature(acc);
+        let carry = self.ecc_non_zero_point_downgrade(&carry);
+        Ok(self.ecc_add(&acc, &carry))
     }
 
     fn msm(
@@ -288,19 +369,33 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
         let r1 = C::generator() * C::Scalar::rand();
         let r2 = C::generator() * C::Scalar::rand();
 
-        let mut nonzero_points = vec![];
+        let mut non_zero_points = vec![];
         let mut normalized_scalars = vec![];
-        let nonzero_p = self.assign_nonzero_point(&C::generator().to_curve());
+        let non_zero_p = self.assign_non_zero_point(&C::generator().to_curve());
         let s_zero = self.ecc_assign_zero_scalar();
 
         for (p, s) in points.iter().zip(scalars.iter()) {
             let s = self.ecc_bisec_scalar(&p.z, &s_zero, s);
-            let p = self.ecc_bisec_to_nonzero_point(p, &nonzero_p);
-            nonzero_points.push(p);
+            let p = self.ecc_bisec_to_non_zero_point(p, &non_zero_p);
+            non_zero_points.push(p);
             normalized_scalars.push(s);
         }
-        let p = self.msm_batch_on_group_unsafe(&nonzero_points, &normalized_scalars, r1, r2)?;
-        Ok(self.ecc_nonzero_point_downgrade(&p))
+        let p = if self.has_select_chip() {
+            self.msm_batch_on_group_non_zero_with_select_chip(
+                &non_zero_points,
+                &normalized_scalars,
+                r1,
+                r2,
+            )?
+        } else {
+            self.msm_batch_on_group_non_zero_without_select_chip(
+                &non_zero_points,
+                &normalized_scalars,
+                r1,
+                r2,
+            )?
+        };
+        Ok(p)
     }
 
     fn ecc_mul(&mut self, a: &AssignedPoint<C, N>, s: Self::AssignedScalar) -> AssignedPoint<C, N> {
@@ -320,6 +415,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>: EccChipBaseOps<C, N> {
 pub trait EccBaseIntegerChipWrapper<W: BaseExt, N: FieldExt> {
     fn base_integer_chip(&mut self) -> &mut dyn IntegerChipOps<W, N>;
     fn select_chip(&mut self) -> &mut dyn SelectChipOps<W, N>;
+    fn has_select_chip(&self) -> bool;
 }
 
 pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
@@ -373,7 +469,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         AssignedPoint::new(x, y, z)
     }
 
-    fn assign_nonzero_point(
+    fn assign_non_zero_point(
         &mut self,
         c: &<C as CurveAffine>::CurveExt,
     ) -> AssignedNonZeroPoint<C, N> {
@@ -720,7 +816,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         (index_cell, ci.clone())
     }
 
-    fn lambda_to_point_unsafe(
+    fn lambda_to_point_non_zero(
         &mut self,
         lambda: &AssignedInteger<C::Base, N>,
         a: &AssignedNonZeroPoint<C, N>,
@@ -757,7 +853,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
 
         // x cannot be same
         let succeed = self.base_integer_chip().base_chip().try_assert_false(&x_eq);
-        let res = self.lambda_to_point_unsafe(&tangent, a, b);
+        let res = self.lambda_to_point_non_zero(&tangent, a, b);
 
         if succeed {
             Ok(res)
@@ -781,7 +877,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
 
         // This line is unnecessary, but keep it for security.
         let succeed = self.base_integer_chip().base_chip().try_assert_false(&z);
-        let res = self.lambda_to_point_unsafe(&v, &a, &a);
+        let res = self.lambda_to_point_non_zero(&v, &a, &a);
 
         if succeed {
             Ok(res)
@@ -790,21 +886,58 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         }
     }
 
-    fn ecc_neg_unsafe(&mut self, a: &AssignedNonZeroPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
+    fn ecc_neg_non_zero(&mut self, a: &AssignedNonZeroPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
         let x = a.x.clone();
         let y = self.base_integer_chip().int_neg(&a.y);
 
         AssignedNonZeroPoint::new(x, y)
     }
 
-    fn ecc_reduce_unsafe(&mut self, a: &AssignedNonZeroPoint<C, N>) -> AssignedNonZeroPoint<C, N> {
+    fn ecc_reduce_non_zero(
+        &mut self,
+        a: &AssignedNonZeroPoint<C, N>,
+    ) -> AssignedNonZeroPoint<C, N> {
         let x = self.base_integer_chip().reduce(&a.x);
         let y = self.base_integer_chip().reduce(&a.y);
 
         AssignedNonZeroPoint::new(x, y)
     }
 
-    fn pick_candidate_unsafe(
+    fn ecc_bisec_non_zero_point(
+        &mut self,
+        cond: &AssignedCondition<N>,
+        a: &AssignedNonZeroPoint<C, N>,
+        b: &AssignedNonZeroPoint<C, N>,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let x = self.base_integer_chip().bisec_int(cond, &a.x, &b.x);
+        let y = self.base_integer_chip().bisec_int(cond, &a.y, &b.y);
+
+        AssignedNonZeroPoint::new(x, y)
+    }
+
+    fn bisec_candidate_non_zero(
+        &mut self,
+        candidates: &Vec<AssignedNonZeroPoint<C, N>>,
+        group_bits: &Vec<AssignedCondition<N>>,
+    ) -> AssignedNonZeroPoint<C, N> {
+        let mut curr_candidates: Vec<_> = candidates.clone();
+        for bit in group_bits {
+            let mut next_candidates = vec![];
+
+            for it in curr_candidates.chunks(2) {
+                let a0 = &it[0];
+                let a1 = &it[1];
+
+                let cell = self.ecc_bisec_non_zero_point(&bit, a1, a0);
+                next_candidates.push(cell);
+            }
+            curr_candidates = next_candidates;
+        }
+        assert_eq!(curr_candidates.len(), 1);
+        curr_candidates[0].clone()
+    }
+
+    fn pick_candidate_non_zero(
         &mut self,
         candidates: &Vec<AssignedNonZeroPoint<C, N>>,
         group_bits: &Vec<AssignedCondition<N>>,
@@ -824,7 +957,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         (index, ci.clone())
     }
 
-    fn assign_selected_point_unsafe(
+    fn assign_selected_point_non_zero(
         &mut self,
         p: &AssignedNonZeroPoint<C, N>,
         sc: &AssignedValue<N>,
@@ -838,13 +971,13 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         AssignedNonZeroPoint { x, y }
     }
 
-    fn assign_cache_point_unsafe(&mut self, p: &AssignedNonZeroPoint<C, N>, g: usize, sc: usize) {
+    fn assign_cache_point_non_zero(&mut self, p: &AssignedNonZeroPoint<C, N>, g: usize, sc: usize) {
         let mut i = 0;
         self.assign_cache_integer(&p.x, sc, g, &mut i);
         self.assign_cache_integer(&p.y, sc, g, &mut i);
     }
 
-    fn ecc_assert_equal_unsafe(
+    fn ecc_assert_equal_non_zero(
         &mut self,
         a: &AssignedNonZeroPoint<C, N>,
         b: &AssignedNonZeroPoint<C, N>,
@@ -853,7 +986,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         self.base_integer_chip().assert_int_equal(&a.y, &b.y);
     }
 
-    fn ecc_assert_nonzero_point(
+    fn ecc_assert_non_zero_point(
         &mut self,
         a: &AssignedPoint<C, N>,
     ) -> Result<AssignedNonZeroPoint<C, N>, UnsafeError> {
@@ -869,7 +1002,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         }
     }
 
-    fn ecc_nonzero_point_downgrade(
+    fn ecc_non_zero_point_downgrade(
         &mut self,
         a: &AssignedNonZeroPoint<C, N>,
     ) -> AssignedPoint<C, N> {
@@ -884,7 +1017,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         }
     }
 
-    fn ecc_bisec_to_nonzero_point(
+    fn ecc_bisec_to_non_zero_point(
         &mut self,
         a: &AssignedPoint<C, N>,
         b: &AssignedNonZeroPoint<C, N>,

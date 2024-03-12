@@ -92,8 +92,22 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
 
 pub struct NativeScalarEccContext<C: CurveAffine>(
     pub IntegerContext<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>,
-    pub usize, // msm prefix
+    pub usize, // msm prefix, if it is usize::MAX, disable select chip
 );
+
+impl<C: CurveAffine> NativeScalarEccContext<C> {
+    pub fn new_with_select_chip(
+        ctx: IntegerContext<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>,
+    ) -> Self {
+        Self(ctx, 0)
+    }
+
+    pub fn new_without_select_chip(
+        ctx: IntegerContext<<C as CurveAffine>::Base, <C as CurveAffine>::ScalarExt>,
+    ) -> Self {
+        Self(ctx, usize::MAX)
+    }
+}
 
 impl<C: CurveAffine> From<NativeScalarEccContext<C>> for Context<C::Scalar> {
     fn from(value: NativeScalarEccContext<C>) -> Self {
@@ -384,6 +398,27 @@ impl<N: FieldExt> Records<N> {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn assign_all_with_optional_select_chip(
+        &self,
+        region: &mut Region<'_, N>,
+        base_chip: &BaseChip<N>,
+        range_chip: &RangeChip<N>,
+        select_chip: Option<&SelectChip<N>>,
+    ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
+        let base_cells = self._assign_to_base_chip(region, base_chip)?;
+        let range_cells = self._assign_to_range_chip(region, range_chip)?;
+        let select_cells = select_chip
+            .map(|select_chip| self._assign_to_select_chip(region, select_chip))
+            .unwrap_or(Ok(vec![]))?;
+        // Check in case leak the chip dependency
+        if select_chip.is_none() {
+            assert!(self.select_height == 0);
+        }
+        let cells = vec![base_cells, range_cells, select_cells];
+        self._assign_permutation(region, &cells)?;
+        Ok(cells)
     }
 
     pub fn assign_all(
