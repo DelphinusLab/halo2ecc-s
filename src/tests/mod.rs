@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
-    circuit::{Layouter, SimpleFloorPlanner},
+    circuit::{floor_planner::FlatFloorPlanner, Layouter},
     dev::MockProver,
     pairing::bn256::{Bn256, Fr, G1Affine},
     plonk::{
@@ -20,6 +20,7 @@ use crate::{
     circuit::{
         base_chip::{BaseChip, BaseChipConfig},
         range_chip::{RangeChip, RangeChipConfig},
+        select_chip::{SelectChip, SelectChipConfig},
     },
     context::{Context, Records},
 };
@@ -61,6 +62,7 @@ fn random_bls12_381_fq() -> halo2_proofs::pairing::bls12_381::Fq {
 struct TestChipConfig {
     base_chip_config: BaseChipConfig,
     range_chip_config: RangeChipConfig,
+    select_chip_config: SelectChipConfig,
 }
 
 #[derive(Default, Clone)]
@@ -70,7 +72,7 @@ struct TestCircuit<N: FieldExt> {
 
 impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     type Config = TestChipConfig;
-    type FloorPlanner = SimpleFloorPlanner;
+    type FloorPlanner = FlatFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
         Self::default()
@@ -79,7 +81,129 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
         let base_chip_config = BaseChip::configure(meta);
         let range_chip_config = RangeChip::<N>::configure(meta);
+        let select_chip_config = SelectChip::<N>::configure(meta);
         TestChipConfig {
+            base_chip_config,
+            range_chip_config,
+            select_chip_config,
+        }
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<N>,
+    ) -> Result<(), Error> {
+        let base_chip = BaseChip::new(config.base_chip_config);
+        let range_chip = RangeChip::<N>::new(config.range_chip_config);
+        let select_chip = SelectChip::<N>::new(config.select_chip_config);
+
+        range_chip.init_table(&mut layouter)?;
+
+        layouter.assign_region(
+            || "base",
+            |mut region| {
+                let timer = start_timer!(|| "assign");
+                self.records
+                    .assign_all(&mut region, &base_chip, &range_chip, &select_chip)?;
+                end_timer!(timer);
+                Ok(())
+            },
+        )?;
+
+        Ok(())
+    }
+}
+
+pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
+    println!(
+        "offset {} {} {}",
+        ctx.range_offset, ctx.base_offset, ctx.select_offset
+    );
+
+    let circuit = TestCircuit::<Fr> {
+        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+    };
+
+    let prover = match MockProver::run(k, &circuit, vec![]) {
+        Ok(prover) => prover,
+        Err(e) => panic!("{:#?}", e),
+    };
+    assert_eq!(prover.verify(), Ok(()));
+}
+
+pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
+    println!("offset {} {}", ctx.range_offset, ctx.base_offset);
+
+    let circuit = TestCircuit::<Fr> {
+        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+    };
+
+    let timer = start_timer!(|| format!("build params with K = {}", k));
+    let params: Params<G1Affine> = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+    end_timer!(timer);
+
+    let timer = start_timer!(|| "build vk");
+    let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+    end_timer!(timer);
+
+    let vk_for_verify = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+
+    let timer = start_timer!(|| "build pk");
+    let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+    end_timer!(timer);
+
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+
+    let timer = start_timer!(|| "create proof");
+    create_proof(&params, &pk, &[circuit], &[&[]], OsRng, &mut transcript)
+        .expect("proof generation should not fail");
+    end_timer!(timer);
+
+    let proof = transcript.finalize();
+
+    let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
+
+    let strategy = SingleVerifier::new(&params_verifier);
+    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+
+    let timer = start_timer!(|| "verify proof");
+    verify_proof(
+        &params_verifier,
+        &vk_for_verify,
+        strategy,
+        &[&[]],
+        &mut transcript,
+    )
+    .unwrap();
+    end_timer!(timer);
+}
+
+// for circuit without select chip
+
+#[derive(Clone)]
+struct TestNoSelectChipConfig {
+    base_chip_config: BaseChipConfig,
+    range_chip_config: RangeChipConfig,
+}
+
+#[derive(Default, Clone)]
+struct TestNoSelectCircuit<N: FieldExt> {
+    records: Records<N>,
+}
+
+impl<N: FieldExt> Circuit<N> for TestNoSelectCircuit<N> {
+    type Config = TestNoSelectChipConfig;
+    type FloorPlanner = FlatFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self::default()
+    }
+
+    fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
+        let base_chip_config = BaseChip::configure(meta);
+        let range_chip_config = RangeChip::<N>::configure(meta);
+        TestNoSelectChipConfig {
             base_chip_config,
             range_chip_config,
         }
@@ -97,10 +221,14 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
 
         layouter.assign_region(
             || "base",
-            |mut region| {
+            |region| {
                 let timer = start_timer!(|| "assign");
-                self.records
-                    .assign_all(&mut region, &base_chip, &range_chip)?;
+                self.records.assign_all_with_optional_select_chip(
+                    region,
+                    &base_chip,
+                    &range_chip,
+                    None,
+                )?;
                 end_timer!(timer);
                 Ok(())
             },
@@ -110,10 +238,13 @@ impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     }
 }
 
-pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
-    println!("offset {} {}", ctx.range_offset, ctx.base_offset);
+pub fn run_circuit_on_bn256_without_select_chip(ctx: Context<Fr>, k: u32) {
+    println!(
+        "offset {} {} {}",
+        ctx.range_offset, ctx.base_offset, ctx.select_offset
+    );
 
-    let circuit = TestCircuit::<Fr> {
+    let circuit = TestNoSelectCircuit::<Fr> {
         records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
     };
 
@@ -124,10 +255,10 @@ pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
     assert_eq!(prover.verify(), Ok(()));
 }
 
-pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
+pub fn bench_circuit_on_bn256_without_select_chip(ctx: Context<Fr>, k: u32) {
     println!("offset {} {}", ctx.range_offset, ctx.base_offset);
 
-    let circuit = TestCircuit::<Fr> {
+    let circuit = TestNoSelectCircuit::<Fr> {
         records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
     };
 

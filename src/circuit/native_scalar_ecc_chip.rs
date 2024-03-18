@@ -6,7 +6,10 @@ use num_integer::Integer;
 use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
+use super::ecc_chip::MSM_LIMIT;
+use super::ecc_chip::MSM_PREFIX_OFFSET;
 use super::integer_chip::IntegerChipOps;
+use super::select_chip::SelectChipOps;
 use crate::assign::AssignedCondition;
 use crate::assign::AssignedValue;
 use crate::circuit::ecc_chip::EccChipBaseOps;
@@ -22,6 +25,17 @@ impl<C: CurveAffine> EccBaseIntegerChipWrapper<C::Base, C::ScalarExt>
         &mut self,
     ) -> &mut dyn IntegerChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
         &mut self.0
+    }
+    fn select_chip(&mut self) -> &mut dyn SelectChipOps<<C as CurveAffine>::Base, C::ScalarExt> {
+        if self.1 != usize::MAX {
+            &mut self.0
+        } else {
+            println!("ERROR: select chip is not available");
+            unreachable!()
+        }
+    }
+    fn has_select_chip(&self) -> bool {
+        self.1 < usize::MAX
     }
 }
 
@@ -104,5 +118,27 @@ impl<C: CurveAffine> EccChipScalarOps<C, C::ScalarExt> for NativeScalarEccContex
             .collect();
         res.reverse();
         res
+    }
+
+    fn get_and_increase_msm_prefix(&mut self) -> usize {
+        let ret = self.1;
+        assert!(ret < MSM_LIMIT);
+        self.1 += MSM_PREFIX_OFFSET;
+        ret
+    }
+
+    fn ecc_bisec_scalar(
+        &mut self,
+        cond: &AssignedCondition<C::ScalarExt>,
+        a: &Self::AssignedScalar,
+        b: &Self::AssignedScalar,
+    ) -> Self::AssignedScalar {
+        self.base_integer_chip().base_chip().bisec(cond, a, b)
+    }
+
+    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar {
+        self.base_integer_chip()
+            .base_chip()
+            .assign_constant(C::ScalarExt::zero())
     }
 }

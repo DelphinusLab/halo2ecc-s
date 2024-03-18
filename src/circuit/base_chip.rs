@@ -398,6 +398,29 @@ pub trait BaseChipOps<N: FieldExt> {
         AssignedCondition(res)
     }
 
+    fn not_and(
+        &mut self,
+        a: &AssignedCondition<N>,
+        b: &AssignedCondition<N>,
+    ) -> AssignedCondition<N> {
+        assert!(self.var_columns() >= 4);
+        assert!(self.mul_columns() >= 1);
+
+        let one = N::one();
+        let zero = N::zero();
+
+        let c = b.0.val - a.0.val * b.0.val;
+
+        let cells = self.one_line_with_last(
+            vec![pair!(&a.0, zero), pair!(&b.0, one)],
+            pair!(c, -one),
+            None,
+            (vec![-one], None),
+        );
+
+        AssignedCondition(cells.1)
+    }
+
     fn or(&mut self, a: &AssignedCondition<N>, b: &AssignedCondition<N>) -> AssignedCondition<N> {
         let one = N::one();
         let c = a.0.val + b.0.val - a.0.val * b.0.val;
@@ -465,6 +488,11 @@ pub trait BaseChipOps<N: FieldExt> {
     fn assert_false(&mut self, a: &AssignedCondition<N>) {
         assert!(a.0.val == N::zero());
         self.assert_constant(&a.0, N::zero())
+    }
+
+    fn try_assert_false(&mut self, a: &AssignedCondition<N>) -> bool {
+        self.assert_constant(&a.0, N::zero());
+        a.0.val == N::zero()
     }
 }
 
