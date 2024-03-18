@@ -225,10 +225,10 @@ impl<N: FieldExt> RangeChip<N> {
         }
     }
 
-    pub fn init_table(&self, layouter: &mut impl Layouter<N>) -> Result<(), Error> {
+    pub fn init_table(&self, layouter: &impl Layouter<N>) -> Result<(), Error> {
         layouter.assign_table(
             || "common range table",
-            |mut table| {
+            |table| {
                 let mut offset = 0;
                 for tag in 0..COMMON_RANGE_BITS + 1 {
                     for value in 0..1 << tag {

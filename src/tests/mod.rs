@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
-    circuit::{Layouter, SimpleFloorPlanner},
+    circuit::{floor_planner::FlatFloorPlanner, Layouter},
     dev::MockProver,
     pairing::bn256::{Bn256, Fr, G1Affine},
     plonk::{
@@ -72,7 +72,7 @@ struct TestCircuit<N: FieldExt> {
 
 impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     type Config = TestChipConfig;
-    type FloorPlanner = SimpleFloorPlanner;
+    type FloorPlanner = FlatFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
         Self::default()
@@ -194,7 +194,7 @@ struct TestNoSelectCircuit<N: FieldExt> {
 
 impl<N: FieldExt> Circuit<N> for TestNoSelectCircuit<N> {
     type Config = TestNoSelectChipConfig;
-    type FloorPlanner = SimpleFloorPlanner;
+    type FloorPlanner = FlatFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
         Self::default()
@@ -221,10 +221,10 @@ impl<N: FieldExt> Circuit<N> for TestNoSelectCircuit<N> {
 
         layouter.assign_region(
             || "base",
-            |mut region| {
+            |region| {
                 let timer = start_timer!(|| "assign");
                 self.records.assign_all_with_optional_select_chip(
-                    &mut region,
+                    region,
                     &base_chip,
                     &range_chip,
                     None,

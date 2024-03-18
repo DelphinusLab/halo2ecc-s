@@ -21,3 +21,4 @@ ark-std = { version = "0.3", features = ["print-trace"] }
 [features]
 default = []
 cuda = ["halo2_proofs/cuda"]
+
