@@ -58,6 +58,21 @@ impl<N: FieldExt> Context<N> {
             select_offset: 0,
         }
     }
+
+    pub fn clone_without_permutation(&self) -> Self {
+        Self {
+            records: Records {
+                inner: self.records.inner.clone(),
+                permutations: vec![],
+                base_height: self.records.base_height,
+                range_height: self.records.range_height,
+                select_height: self.records.select_height,
+            },
+            base_offset: self.base_offset,
+            range_offset: self.range_offset,
+            select_offset: self.select_offset,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

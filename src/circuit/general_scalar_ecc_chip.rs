@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::arithmetic::FieldExt;
@@ -5,6 +8,8 @@ use halo2_proofs::arithmetic::FieldExt;
 use super::base_chip::BaseChipOps;
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use super::ecc_chip::EccChipScalarOps;
+use super::ecc_chip::Offset;
+use super::ecc_chip::ParallelClone;
 use super::ecc_chip::MSM_LIMIT;
 use super::ecc_chip::MSM_PREFIX_OFFSET;
 use super::integer_chip::IntegerChipOps;
@@ -13,6 +18,7 @@ use crate::assign::AssignedCondition;
 use crate::assign::AssignedInteger;
 use crate::circuit::ecc_chip::EccChipBaseOps;
 use crate::context::GeneralScalarEccContext;
+use crate::context::IntegerContext;
 use crate::pair;
 use crate::utils::field_to_bn;
 
@@ -31,6 +37,52 @@ impl<C: CurveAffine, N: FieldExt> EccBaseIntegerChipWrapper<C::Base, N>
 }
 
 impl<C: CurveAffine, N: FieldExt> EccChipBaseOps<C, N> for GeneralScalarEccContext<C, N> {}
+
+unsafe impl<C: CurveAffine, N: FieldExt> Send for GeneralScalarEccContext<C, N> {}
+
+impl<C: CurveAffine, N: FieldExt> ParallelClone for GeneralScalarEccContext<C, N> {
+    fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
+        let mut ctx = (*(*self.native_ctx).borrow()).clone_without_permutation();
+        ctx.base_offset += offset_diff.base_offset_diff;
+        ctx.range_offset += offset_diff.range_offset_diff;
+        ctx.select_offset += offset_diff.select_offset_diff;
+
+        let ctx = Rc::new(RefCell::new(ctx));
+        let base_integer_ctx = IntegerContext {
+            info: self.base_integer_ctx.info.clone(),
+            ctx: ctx.clone(),
+        };
+        let scalar_integer_ctx = IntegerContext {
+            info: self.scalar_integer_ctx.info.clone(),
+            ctx: ctx.clone(),
+        };
+        Self {
+            base_integer_ctx,
+            scalar_integer_ctx,
+            native_ctx: ctx.clone(),
+            msm_prefix: self.msm_prefix,
+        }
+    }
+
+    fn offset(&self) -> Offset {
+        Offset {
+            base_offset_diff: self.native_ctx.borrow().base_offset,
+            range_offset_diff: self.native_ctx.borrow().range_offset,
+            select_offset_diff: self.native_ctx.borrow().select_offset,
+        }
+    }
+
+    fn merge(&self, other: Self) {
+        let record = &mut self.native_ctx.borrow_mut().records;
+        let record_other = &mut other.native_ctx.borrow_mut().records;
+
+        record.permutations.append(&mut record_other.permutations);
+
+        record.base_height = record.base_height.max(record_other.base_height);
+        record.range_height = record.select_height.max(record_other.range_height);
+        record.select_height = record.select_height.max(record_other.select_height);
+    }
+}
 
 impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccContext<C, N> {
     type AssignedScalar = AssignedInteger<C::Scalar, N>;
