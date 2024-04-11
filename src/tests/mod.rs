@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
@@ -122,7 +120,7 @@ pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
     );
 
     let circuit = TestCircuit::<Fr> {
-        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+        records: ctx.records,
     };
 
     let prover = match MockProver::run(k, &circuit, vec![]) {
@@ -136,7 +134,7 @@ pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
     println!("offset {} {}", ctx.range_offset, ctx.base_offset);
 
     let circuit = TestCircuit::<Fr> {
-        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+        records: ctx.records,
     };
 
     let timer = start_timer!(|| format!("build params with K = {}", k));
@@ -245,7 +243,7 @@ pub fn run_circuit_on_bn256_without_select_chip(ctx: Context<Fr>, k: u32) {
     );
 
     let circuit = TestNoSelectCircuit::<Fr> {
-        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+        records: ctx.records,
     };
 
     let prover = match MockProver::run(k, &circuit, vec![]) {
@@ -259,7 +257,7 @@ pub fn bench_circuit_on_bn256_without_select_chip(ctx: Context<Fr>, k: u32) {
     println!("offset {} {}", ctx.range_offset, ctx.base_offset);
 
     let circuit = TestNoSelectCircuit::<Fr> {
-        records: Arc::try_unwrap(ctx.records).unwrap().into_inner().unwrap(),
+        records: ctx.records,
     };
 
     let timer = start_timer!(|| format!("build params with K = {}", k));

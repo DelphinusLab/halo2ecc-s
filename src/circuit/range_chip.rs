@@ -284,10 +284,9 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
 
     fn assign_common(&mut self, bn: &BigUint) -> AssignedValue<N> {
         let v = bn_to_field(bn);
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
-        let res = records.assign_one_line_range_value(
-            self.ctx.borrow_mut().range_offset,
+        let offset = self.ctx.borrow().range_offset;
+        let res = self.ctx.borrow_mut().records.assign_one_line_range_value(
+            offset,
             &[v][..],
             v,
             COMMON_RANGE_BITS,
@@ -303,14 +302,12 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
             MAX_CHUNKS * RANGE_CHIP_RANGE_COLUMNS as u64,
             &self.info().common_range_mask,
         );
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
-        let (res, offset_increase) = records.assign_range_value(
-            self.ctx.borrow_mut().range_offset,
-            v.1,
-            v.0,
-            info.limb_bits,
-        );
+        let offset = self.ctx.borrow().range_offset;
+        let (res, offset_increase) =
+            self.ctx
+                .borrow_mut()
+                .records
+                .assign_range_value(offset, v.1, v.0, info.limb_bits);
         self.ctx.borrow_mut().range_offset += offset_increase as usize;
         res
     }
@@ -322,10 +319,9 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
             self.info().w_ceil_leading_decompose,
             &info.common_range_mask,
         );
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
-        let (res, offset_increase) = records.assign_range_value(
-            self.ctx.borrow_mut().range_offset,
+        let offset = self.ctx.borrow().range_offset;
+        let (res, offset_increase) = self.ctx.borrow_mut().records.assign_range_value(
+            offset,
             v.1,
             v.0,
             info.w_ceil_bits % info.limb_bits,
@@ -337,10 +333,9 @@ impl<W: BaseExt, N: FieldExt> RangeChipOps<W, N> for IntegerContext<W, N> {
     fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N> {
         let info = self.info();
         let v = decompose_bn(bn, self.info().d_leading_decompose, &info.common_range_mask);
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
-        let (res, offset_increase) = records.assign_range_value(
-            self.ctx.borrow_mut().range_offset,
+        let offset = self.ctx.borrow().range_offset;
+        let (res, offset_increase) = self.ctx.borrow_mut().records.assign_range_value(
+            offset,
             v.1,
             v.0,
             info.d_bits % info.limb_bits,

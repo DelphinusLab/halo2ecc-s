@@ -16,7 +16,7 @@ fn test_native_ecc_chip_with_select_chip() {
     let mut scalars = vec![];
     let mut acc = G1::identity();
 
-    for _ in 0..100 {
+    for _ in 0..1000 {
         let a = random_fr();
         let b = random_fr();
         let p = G1::generator() * a;
@@ -57,7 +57,7 @@ fn test_native_ecc_chip_with_select_chip() {
     }
     end_timer!(timer);
 
-    run_circuit_on_bn256(final_ctx.unwrap().into(), 22);
+    run_circuit_on_bn256(final_ctx.unwrap().into(), 23);
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn test_native_ecc_chip_without_select_chip() {
     let mut scalars = vec![];
     let mut acc = G1::identity();
 
-    for _ in 0..100 {
+    for _ in 0..200 {
         let a = random_fr();
         let b = random_fr();
         let p = G1::generator() * a;

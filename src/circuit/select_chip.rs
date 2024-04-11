@@ -114,10 +114,12 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         group_index: usize,
         selector: usize,
     ) {
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
+        let select_offset = self.ctx.borrow().select_offset;
         let encoded_offset = encode_offset(group_index, selector, offset);
-        records.assign_cache_value(self.ctx.borrow_mut().select_offset, v, encoded_offset);
+        self.ctx
+            .borrow_mut()
+            .records
+            .assign_cache_value(select_offset, v, encoded_offset);
         self.ctx.borrow_mut().select_offset += 1;
     }
     fn assign_selected_value(
@@ -127,11 +129,10 @@ impl<W: BaseExt, N: FieldExt> SelectChipOps<W, N> for IntegerContext<W, N> {
         group_index: usize,
         selector: &AssignedValue<N>,
     ) -> AssignedValue<N> {
-        let records_mtx = self.ctx.borrow().records.clone();
-        let mut records = records_mtx.lock().unwrap();
+        let select_offset = self.ctx.borrow().select_offset;
         let encoded_offset = encode_offset(group_index, 0, offset);
-        let v = records.assign_select_value(
-            self.ctx.borrow_mut().select_offset,
+        let v = self.ctx.borrow_mut().records.assign_select_value(
+            select_offset,
             v,
             encoded_offset,
             selector,

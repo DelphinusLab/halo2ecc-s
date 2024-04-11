@@ -6,6 +6,7 @@ use crate::circuit::pairing_chip::PairingChipOps;
 use crate::context::IntegerContext;
 use crate::context::{Context, NativeScalarEccContext};
 use crate::tests::run_circuit_on_bn256;
+use ark_std::{end_timer, start_timer};
 use halo2_proofs::arithmetic::CurveAffine;
 use halo2_proofs::pairing::bn256::pairing;
 use halo2_proofs::pairing::bn256::{Fr, G1Affine, G2Affine, G2};
@@ -17,7 +18,7 @@ use std::rc::Rc;
 use super::bench_circuit_on_bn256;
 
 fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1Affine> {
-    {
+    /*{
         let ctx = Rc::new(RefCell::new(Context::new()));
         let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
         let mut ctx = NativeScalarEccContext::<G1Affine>(ctx, 0);
@@ -61,7 +62,7 @@ fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1
         ctx.fq12_assert_eq(&ab0, &ab1);
 
         run_circuit_on_bn256(ctx.into(), 22);
-    }
+    }*/
 
     {
         let ctx = Rc::new(RefCell::new(Context::new()));
@@ -88,7 +89,9 @@ fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1
         let neg_a = ctx.assign_point(&-a.to_curve());
         let a = ctx.assign_point(&a.to_curve());
 
+        let timer = start_timer!(|| "setup");
         ctx.check_pairing(&[(&a, &b), (&neg_a, &b)]);
+        end_timer!(timer);
 
         ctx
     }

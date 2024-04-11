@@ -505,10 +505,8 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
         MUL_COLUMNS
     }
 
-
     fn enable_permute(&mut self, x: &AssignedValue<N>) {
-        let mut records = self.records.lock().unwrap();
-        records.enable_permute(&x.cell);
+        self.records.enable_permute(&x.cell);
     }
 
     fn one_line(
@@ -517,7 +515,6 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
         constant: Option<N>,
         mul_next_coeffs: (Vec<N>, Option<N>),
     ) -> Vec<AssignedValue<N>> {
-        let mut records = self.records.lock().unwrap();
         let res = base_coeff_pairs
             .iter()
             .map(|x| x.0.clone().value())
@@ -525,7 +522,7 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
             .map(|(i, v)| AssignedValue::new(Chip::BaseChip, i, self.base_offset, v))
             .collect();
 
-        records.one_line(
+        self.records.one_line(
             self.base_offset,
             base_coeff_pairs,
             constant,
@@ -545,7 +542,6 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
         constant: Option<N>,
         mul_next_coeffs: (Vec<N>, Option<N>),
     ) -> (Vec<AssignedValue<N>>, AssignedValue<N>) {
-        let mut records = self.records.lock().unwrap();
         let res0 = base_coeff_pairs
             .iter()
             .map(|x| x.0.clone().value())
@@ -559,7 +555,7 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
             last.0.clone().value(),
         );
 
-        records.one_line_with_last(
+        self.records.one_line_with_last(
             self.base_offset,
             base_coeff_pairs,
             last,

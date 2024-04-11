@@ -1,3 +1,4 @@
+#![feature(get_mut_unchecked)]
 pub mod utils;
 pub mod circuit;
 pub mod context;
