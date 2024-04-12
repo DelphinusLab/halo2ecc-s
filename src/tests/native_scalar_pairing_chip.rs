@@ -18,7 +18,7 @@ use std::rc::Rc;
 use super::bench_circuit_on_bn256;
 
 fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1Affine> {
-    /*{
+    {
         let ctx = Rc::new(RefCell::new(Context::new()));
         let ctx = IntegerContext::<halo2_proofs::pairing::bn256::Fq, Fr>::new(ctx);
         let mut ctx = NativeScalarEccContext::<G1Affine>(ctx, 0);
@@ -62,7 +62,7 @@ fn build_bn256_pairing_chip_over_bn256_fr_circuit() -> NativeScalarEccContext<G1
         ctx.fq12_assert_eq(&ab0, &ab1);
 
         run_circuit_on_bn256(ctx.into(), 22);
-    }*/
+    }
 
     {
         let ctx = Rc::new(RefCell::new(Context::new()));
