@@ -33,7 +33,8 @@ pub mod range_chip;
 
 fn random<N: BaseExt>() -> N {
     let seed = chrono::offset::Utc::now()
-        .timestamp_nanos()
+        .timestamp_nanos_opt()
+        .unwrap()
         .try_into()
         .unwrap();
     let rng = XorShiftRng::seed_from_u64(seed);
