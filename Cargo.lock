@@ -34,6 +34,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
 dependencies = [
+ "colored",
  "num-traits",
  "rand",
 ]
@@ -475,6 +476,7 @@ name = "halo2ecc-s"
 version = "0.3.2"
 dependencies = [
  "ark-std 0.3.0",
+ "ark-std 0.4.0",
  "chrono",
  "halo2_proofs",
  "num-bigint",
