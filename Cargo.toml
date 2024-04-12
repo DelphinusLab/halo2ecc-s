@@ -17,7 +17,6 @@ ark-std = {version = "0.4.0", features = ["print-trace"] }
 chrono = "0.4.19"
 rand = "0.8"
 rand_xorshift = "0.3"
-ark-std = { version = "0.3", features = ["print-trace"] }
 
 [features]
 default = []

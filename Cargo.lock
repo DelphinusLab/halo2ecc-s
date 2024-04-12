@@ -475,7 +475,6 @@ dependencies = [
 name = "halo2ecc-s"
 version = "0.3.2"
 dependencies = [
- "ark-std 0.3.0",
  "ark-std 0.4.0",
  "chrono",
  "halo2_proofs",

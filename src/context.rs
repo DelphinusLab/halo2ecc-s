@@ -23,6 +23,7 @@ use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::circuit::AssignedCell;
 use halo2_proofs::circuit::Region;
 use halo2_proofs::plonk::Error;
+use rayon::iter::*;
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -247,9 +248,10 @@ impl<N: FieldExt> Records<N> {
         region: &Region<'_, N>,
         base_chip: &BaseChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
-        let mut cells = vec![];
-
-        cells.resize(VAR_COLUMNS, vec![None; self.base_height]);
+        let mut cells = (0..VAR_COLUMNS)
+            .into_par_iter()
+            .map(|_| vec![None; self.base_height])
+            .collect::<Vec<_>>();
 
         for (row, advs) in self.inner.base_adv_record.iter().enumerate() {
             if row >= self.base_height {
@@ -301,7 +303,10 @@ impl<N: FieldExt> Records<N> {
         region: &Region<'_, N>,
         range_chip: &RangeChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
-        let mut cells = vec![vec![None; self.range_height]; RANGE_CHIP_ADV_COLUMNS];
+        let mut cells = (0..RANGE_CHIP_ADV_COLUMNS)
+            .into_par_iter()
+            .map(|_| vec![None; self.range_height])
+            .collect::<Vec<_>>();
 
         for (row, fix) in self.inner.range_fix_record.iter().enumerate() {
             if row >= self.range_height {
@@ -348,9 +353,10 @@ impl<N: FieldExt> Records<N> {
         region: &Region<'_, N>,
         select_chip: &SelectChip<N>,
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
-        let mut cells = vec![];
-
-        cells.resize(4, vec![None; self.select_height]);
+        let mut cells = (0..4)
+            .into_par_iter()
+            .map(|_| vec![None; self.select_height])
+            .collect::<Vec<_>>();
 
         for (row, advs) in self.inner.select_adv_record.iter().enumerate() {
             if row >= self.base_height {
