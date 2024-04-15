@@ -253,15 +253,17 @@ impl<N: FieldExt> Records<N> {
             .map(|_| vec![None; self.base_height])
             .collect::<Vec<_>>();
 
-        for (row, advs) in self.inner.base_adv_record.iter().enumerate() {
-            if row >= self.base_height {
-                break;
-            }
-
+        for (row, advs) in self
+            .inner
+            .base_adv_record
+            .iter()
+            .enumerate()
+            .take(self.base_height)
+        {
             for (col, adv) in advs.iter().enumerate() {
                 if adv.0.is_some() {
                     let cell = region.assign_advice(
-                        || "base",
+                        || "base adv col",
                         base_chip.config.base[col],
                         row,
                         || Ok(adv.0.unwrap()),
@@ -273,11 +275,13 @@ impl<N: FieldExt> Records<N> {
             }
         }
 
-        for (row, fixes) in self.inner.base_fix_record.iter().enumerate() {
-            if row >= self.base_height {
-                break;
-            }
-
+        for (row, fixes) in self
+            .inner
+            .base_fix_record
+            .iter()
+            .enumerate()
+            .take(self.base_height)
+        {
             for (col, fix) in fixes.iter().enumerate() {
                 if fix.is_some() {
                     let col = if col < VAR_COLUMNS {
@@ -290,7 +294,7 @@ impl<N: FieldExt> Records<N> {
                         base_chip.config.constant
                     };
 
-                    region.assign_fixed(|| "fix", col, row, || Ok(fix.unwrap()))?;
+                    region.assign_fixed(|| " base fixed col", col, row, || Ok(fix.unwrap()))?;
                 }
             }
         }
@@ -308,11 +312,13 @@ impl<N: FieldExt> Records<N> {
             .map(|_| vec![None; self.range_height])
             .collect::<Vec<_>>();
 
-        for (row, fix) in self.inner.range_fix_record.iter().enumerate() {
-            if row >= self.range_height {
-                break;
-            }
-
+        for (row, fix) in self
+            .inner
+            .range_fix_record
+            .iter()
+            .enumerate()
+            .take(self.range_height)
+        {
             for (col, fix) in fix.iter().enumerate() {
                 if let Some(v) = fix {
                     region.assign_fixed(
@@ -325,11 +331,13 @@ impl<N: FieldExt> Records<N> {
             }
         }
 
-        for (row, adv) in self.inner.range_adv_record.iter().enumerate() {
-            if row >= self.range_height {
-                break;
-            }
-
+        for (row, adv) in self
+            .inner
+            .range_adv_record
+            .iter()
+            .enumerate()
+            .take(self.range_height)
+        {
             for (col, adv) in adv.iter().enumerate() {
                 if let Some(v) = &adv.0 {
                     let cell = region.assign_advice(
@@ -358,13 +366,16 @@ impl<N: FieldExt> Records<N> {
             .map(|_| vec![None; self.select_height])
             .collect::<Vec<_>>();
 
-        for (row, advs) in self.inner.select_adv_record.iter().enumerate() {
-            if row >= self.base_height {
-                break;
-            }
+        for (row, advs) in self
+            .inner
+            .select_adv_record
+            .iter()
+            .enumerate()
+            .take(self.select_height)
+        {
             if advs[0].0.is_some() {
                 let cell = region.assign_advice(
-                    || "base",
+                    || "select limb_info col",
                     select_chip.config.limb_info,
                     row,
                     || Ok(advs[0].0.unwrap()),
@@ -375,7 +386,7 @@ impl<N: FieldExt> Records<N> {
             }
             if advs[1].0.is_some() {
                 let cell = region.assign_advice(
-                    || "base",
+                    || "select selector col",
                     select_chip.config.selector,
                     row,
                     || Ok(advs[1].0.unwrap()),
@@ -386,10 +397,13 @@ impl<N: FieldExt> Records<N> {
             }
         }
 
-        for (row, fixes) in self.inner.select_fix_record.iter().enumerate() {
-            if row >= self.base_height {
-                break;
-            }
+        for (row, fixes) in self
+            .inner
+            .select_fix_record
+            .iter()
+            .enumerate()
+            .take(self.select_height)
+        {
             if fixes[0].is_some() {
                 region.assign_fixed(
                     || "encoded offset",

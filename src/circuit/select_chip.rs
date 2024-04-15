@@ -8,6 +8,13 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 use std::{marker::PhantomData, sync::Arc, vec};
 
+/*
+ * encode bits
+ * 0  - 63: limb_offset, e.g., x.0 x.1 x.2 x.3 y.0 ...
+ * 64 - 83: inner group index
+ * 84 -127: msm prefix
+ * 128-192: selector bits
+ */
 pub const SELECTOR_ENCODE_OFFSET: usize = 128;
 
 /**
