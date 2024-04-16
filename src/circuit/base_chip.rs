@@ -540,7 +540,6 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
 
     fn one_line_with_last(
         &mut self,
-
         base_coeff_pairs: Vec<(ValueSchema<'_, N>, N)>,
         last: (ValueSchema<'_, N>, N),
         constant: Option<N>,
@@ -598,7 +597,7 @@ impl<N: FieldExt> BaseChipOps<N> for Context<N> {
 
             cells.1
         } else {
-            assert!(self.var_columns() >= 3);
+            assert!(self.var_columns() >= 4);
             let t = self.mul_add(&cond.0, a, N::one(), b, one);
             self.mul_add(&cond.0, b, -one, &t, one)
         }
