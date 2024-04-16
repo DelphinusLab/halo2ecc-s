@@ -198,7 +198,7 @@ pub trait BaseChipOps<N: FieldExt> {
         b: &AssignedValue<N>,
         c: N,
     ) -> AssignedValue<N> {
-        assert!(self.var_columns() >= 4);
+        assert!(self.var_columns() >= 3);
         assert!(self.mul_columns() >= 1);
 
         let one = N::one();
@@ -259,10 +259,14 @@ pub trait BaseChipOps<N: FieldExt> {
 
             let mut t = zero;
 
-            for (a, b, c, c_coeff) in ls {
+            for (i, (a, b, c, c_coeff)) in ls.into_iter().enumerate() {
                 self.one_line_with_last(
                     vec![pair!(a, zero), pair!(b, zero), pair!(c, c_coeff)],
-                    pair!(t, one),
+                    if i == 0 {
+                        pair!(t, zero)
+                    } else {
+                        pair!(t, one)
+                    },
                     None,
                     (vec![one], Some(-one)),
                 );
@@ -403,7 +407,7 @@ pub trait BaseChipOps<N: FieldExt> {
         a: &AssignedCondition<N>,
         b: &AssignedCondition<N>,
     ) -> AssignedCondition<N> {
-        assert!(self.var_columns() >= 4);
+        assert!(self.var_columns() >= 3);
         assert!(self.mul_columns() >= 1);
 
         let one = N::one();
