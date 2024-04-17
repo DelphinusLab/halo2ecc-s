@@ -548,6 +548,7 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
     }
 
     fn is_pure_w_modulus(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N> {
+        assert!(a.times == 1);
         let info = self.info();
 
         let native_diff = self
@@ -598,14 +599,16 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
 
     fn assert_int_equal(&mut self, a: &AssignedInteger<W, N>, b: &AssignedInteger<W, N>) {
         let zero = N::zero();
+        let one = N::one();
 
         let diff = self.int_sub(a, b);
         let diff = self.reduce(&diff);
 
-        self.ctx.borrow_mut().assert_constant(&diff.native, zero);
-        self.ctx
+        let sum = self
+            .ctx
             .borrow_mut()
-            .assert_constant(&diff.limbs_le[0], zero);
+            .sum_with_constant(diff.limbs_le.iter().map(|v| (v, one)).collect(), None);
+        self.ctx.borrow_mut().assert_constant(&sum, zero);
     }
 
     fn int_square(&mut self, a: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
