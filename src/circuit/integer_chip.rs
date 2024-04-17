@@ -245,7 +245,7 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
             );
         }
         limbs.push(self.assign_w_ceil_leading_limb(
-            &(w >> ((self.info().limbs as u64 - 1) * self.info().limb_bits) & &info.limb_mask),
+            &((w >> ((self.info().limbs as u64 - 1) * self.info().limb_bits)) & &info.limb_mask),
         ));
 
         let schemas = limbs.iter().zip(info.limb_coeffs.clone());
