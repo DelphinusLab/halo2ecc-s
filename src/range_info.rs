@@ -151,9 +151,15 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
             overflow_limit,
 
             pure_w_check_limbs: (w_ceil_bits - n_floor_bits + limb_bits - 1) / limb_bits,
-            mul_check_limbs: (w_ceil_bits * 2 + overflow_bits * 2 - n_floor_bits + limb_bits - 1)
+            mul_check_limbs: ((w_ceil_bits * 2 + overflow_bits * 2).max(d_bits + w_ceil_bits)
+                - n_floor_bits
+                + limb_bits
+                - 1)
                 / limb_bits,
-            reduce_check_limbs: (w_ceil_bits + overflow_bits - n_floor_bits + limb_bits - 1)
+            reduce_check_limbs: ((w_ceil_bits + overflow_bits).max(common_bits + w_ceil_bits)
+                - n_floor_bits
+                + limb_bits
+                - 1)
                 / limb_bits,
             w_modulus_of_ceil_times,
 
@@ -307,15 +313,16 @@ fn test_range_info() {
         use halo2_proofs::pairing::bn256::Fq;
         use halo2_proofs::pairing::bn256::Fr;
 
-        RangeInfo::<Fq, Fr>::new(18, 6);
+        let info = RangeInfo::<Fq, Fr>::new(18, 6);
+        println!("info {:?}", info);
     }
 
     {
         use halo2_proofs::pairing::bls12_381::Fr as Bls12_381_Fr;
         use halo2_proofs::pairing::bn256::Fr;
 
-        RangeInfo::<Bls12_381_Fr, Fr>::new(18, 6);
-        //println!("info {:?}", info);
+        let info = RangeInfo::<Bls12_381_Fr, Fr>::new(18, 6);
+        println!("info {:?}", info);
     }
 
     {
