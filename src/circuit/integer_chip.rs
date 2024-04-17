@@ -92,6 +92,7 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
 
             let r_bound = usize::min(pos + 1, info.limbs as usize);
             let l_bound = pos.checked_sub(info.limbs as usize - 1).unwrap_or(0);
+            //println!("pos {}, l_bound {}, r_bound {}, info.limbs {}", pos, l_bound, r_bound, info.limbs);
             let l = self.ctx.borrow_mut().mul_add_with_next_line(
                 (l_bound..r_bound)
                     .map(|i| {
@@ -132,11 +133,41 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
         );
 
         // check sum limb[1..] with carry
-        for i in 1..self.info().limbs as usize {
+        for i in 1..info.limbs as usize {
             let u = self.ctx.borrow_mut().sum_with_constant(
                 vec![
                     (&limbs[i], one),
                     (&rem.limbs_le[i], -one),
+                    (&v_h, info.limb_coeffs[1]),
+                    (&v_l, info.limb_coeffs[0]),
+                ],
+                Some(info.limb_modulus_n * borrow - borrow),
+            );
+
+            let (v, r) = field_to_bn(&u.val).div_rem(&info.limb_modulus);
+            assert_eq!(r, BigUint::from(0u64));
+            let (v_h_bn, v_l_bn) = v.div_rem(&info.limb_modulus);
+            v_h = self.assign_common(&v_h_bn);
+            v_l = self.assign_nonleading_limb(&v_l_bn);
+
+            self.ctx.borrow_mut().one_line_with_last(
+                vec![
+                    pair!(&v_h, info.limb_coeffs[2]),
+                    pair!(&v_l, info.limb_coeffs[1]),
+                ],
+                pair!(&u, -one),
+                None,
+                (vec![], None),
+            );
+        }
+
+        assert!(info.limbs <= info.mul_check_limbs);
+
+        // Only required by bl12_381 base field
+        for i in info.limbs as usize..info.mul_check_limbs as usize {
+            let u = self.ctx.borrow_mut().sum_with_constant(
+                vec![
+                    (&limbs[i], one),
                     (&v_h, info.limb_coeffs[1]),
                     (&v_l, info.limb_coeffs[0]),
                 ],
