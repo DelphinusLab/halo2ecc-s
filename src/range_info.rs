@@ -297,6 +297,8 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
             let rem = (&upper & &self.limb_mask) + &self.limb_modulus * times;
             upper = (upper - &rem) >> self.limb_bits;
             limbs.push(bn_to_field::<N>(&rem));
+            assert!(rem >= &self.limb_modulus * times - 1u64);
+            assert!(rem < &self.limb_modulus * (times + 1));
         }
 
         assert!(upper >= (BigUint::from(1u64) << (self.w_ceil_bits % self.limb_bits)) * times);
