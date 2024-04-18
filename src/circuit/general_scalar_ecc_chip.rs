@@ -124,13 +124,14 @@ impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccCon
         let padding = bits.len() % WINDOW_SIZE;
         if padding != 0 {
             let zero = self.native_ctx.borrow_mut().assign_constant(zero);
-            for _ in 0..padding {
+            for _ in padding..WINDOW_SIZE {
                 bits.push(AssignedCondition(zero));
             }
         }
+        assert!(bits.len() % WINDOW_SIZE == 0);
 
         let mut res = bits
-            .chunks(WINDOW_SIZE)
+            .chunks_exact(WINDOW_SIZE)
             .map(|x| Vec::from(x).try_into().unwrap())
             .collect::<Vec<_>>();
 
