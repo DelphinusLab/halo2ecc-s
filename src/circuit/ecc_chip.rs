@@ -145,36 +145,41 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         // Accumulate points of all groups in each window.
         let windows = bits[0].len();
 
-        // For parallel setup, we first calculate the offset change on each window.
+        // For parallel setup, we calculate the offset change on first round.
         // The diff should be same because all point are normalized.
-        let offset_diff = {
-            let mut predict_ops = self.clone();
-            let offset_before = predict_ops.offset();
+        let mut predict_ops = self.clone();
+        let offset_before = predict_ops.offset();
+        let mut line_acc_arr = {
             let mut acc = rand_acc_point_neg.clone();
             for group_index in 0..groups.len() {
                 let group_bits = groups[group_index].iter().map(|bits| bits[0][0]).collect();
-                let ci = predict_ops.bisec_candidate_non_zero(&candidates[group_index], &group_bits);
+                let ci =
+                    predict_ops.bisec_candidate_non_zero(&candidates[group_index], &group_bits);
 
                 acc = predict_ops.ecc_add_unsafe(&ci, &acc)?;
             }
-            let offset_after = predict_ops.offset();
-            offset_after - offset_before
+            vec![acc]
         };
+        let offset_after = predict_ops.offset();
+        let offset_diff = offset_after - offset_before;
+        self.merge(predict_ops);
 
         // Parallel setup on window.
-        let mut cloned_ops = (0..windows)
+        let mut cloned_ops = (1..windows)
             .into_iter()
-            .map(|i| self.clone_with_offset(&offset_diff.scale(i)))
+            .map(|i| (i, self.clone_with_offset(&offset_diff.scale(i))))
             .collect::<Vec<_>>();
 
-        let line_acc_arr = cloned_ops
+        let mut rest_line_acc_arr = cloned_ops
             .par_iter_mut()
-            .enumerate()
             .map(|(wi, op)| {
                 let offset_before = op.offset();
                 let mut acc = rand_acc_point_neg.clone();
                 for group_index in 0..groups.len() {
-                    let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
+                    let group_bits = groups[group_index]
+                        .iter()
+                        .map(|bits| bits[*wi][0])
+                        .collect();
                     let ci = op.bisec_candidate_non_zero(&candidates[group_index], &group_bits);
 
                     acc = op.ecc_add_unsafe(&ci, &acc)?;
@@ -186,13 +191,15 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
                 Ok(acc)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        line_acc_arr.append(&mut rest_line_acc_arr);
+        drop(rest_line_acc_arr);
+
+        for (_, op) in cloned_ops {
+            self.merge(op);
+        }
 
         // Set self offset to the tail and merge.
         *self = self.clone_with_offset(&offset_diff.scale(windows));
-
-        for op in cloned_ops {
-            self.merge(op);
-        }
 
         let mut acc = rand_acc_point.clone();
         for wi in 0..windows {
@@ -206,8 +213,9 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         let acc = self.ecc_non_zero_point_downgrade(&acc);
         let acc = self.to_point_with_curvature(acc);
         let rand_acc_point_neg = self.ecc_non_zero_point_downgrade(&rand_acc_point_neg);
+        let res = self.ecc_add(&acc, &rand_acc_point_neg);
 
-        Ok(self.ecc_add(&acc, &rand_acc_point_neg))
+        Ok(res)
     }
 
     fn msm_batch_on_group_non_zero_with_select_chip(
@@ -274,11 +282,11 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         // Accumulate points of all groups in each window.
         let windows = bits[0].len();
 
-        // For parallel setup, we first calculate the offset change on each window.
+        // For parallel setup, we calculate the offset change on first round.
         // The diff should be same because all point are normalized.
-        let offset_diff = {
-            let mut predict_ops = self.clone();
-            let offset_before = predict_ops.offset();
+        let mut predict_ops = self.clone();
+        let offset_before = predict_ops.offset();
+        let mut line_acc_arr = {
             let mut acc = rand_acc_point_neg.clone();
             for group_index in 0..groups.len() {
                 let group_bits = groups[group_index].iter().map(|bits| bits[0][0]).collect();
@@ -292,24 +300,25 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
 
                 acc = predict_ops.ecc_add_unsafe(&ci, &acc)?;
             }
-            let offset_after = predict_ops.offset();
-            offset_after - offset_before
+            vec![acc]
         };
+        let offset_after = predict_ops.offset();
+        let offset_diff = offset_after - offset_before;
+        self.merge(predict_ops);
 
         // Parallel setup on window.
-        let mut cloned_ops = (0..windows)
+        let mut cloned_ops = (1..windows)
             .into_iter()
-            .map(|i| self.clone_with_offset(&offset_diff.scale(i)))
+            .map(|i| (i, self.clone_with_offset(&offset_diff.scale(i))))
             .collect::<Vec<_>>();
 
-        let line_acc_arr = cloned_ops
+        let mut rest_line_acc_arr = cloned_ops
             .par_iter_mut()
-            .enumerate()
             .map(|(wi, op)| {
                 let offset_before = op.offset();
                 let mut acc = rand_acc_point_neg.clone();
                 for group_index in 0..groups.len() {
-                    let group_bits = groups[group_index].iter().map(|bits| bits[wi][0]).collect();
+                    let group_bits = groups[group_index].iter().map(|bits| bits[*wi][0]).collect();
                     let (index_cell, ci) =
                         op.pick_candidate_non_zero(&candidates[group_index], &group_bits);
                     let ci = op.assign_selected_point_non_zero(
@@ -327,20 +336,21 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
                 Ok(acc)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        line_acc_arr.append(&mut rest_line_acc_arr);
+        drop(rest_line_acc_arr);
+
+        for (_, op) in cloned_ops {
+            self.merge(op);
+        }
 
         // Set self offset to the tail and merge.
         *self = self.clone_with_offset(&offset_diff.scale(windows));
-
-        for op in cloned_ops {
-            self.merge(op);
-        }
 
         // Accumulate points of all windows.
         let mut acc = rand_acc_point.clone();
         for wi in 0..windows {
             acc = self.ecc_double_unsafe(&acc)?;
             acc = self.ecc_add_unsafe(&line_acc_arr[wi], &acc)?;
-
             if groups.len().is_odd() {
                 acc = self.ecc_add_unsafe(&acc, &rand_line_point_neg)?;
             }
@@ -350,8 +360,9 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         let acc = self.ecc_non_zero_point_downgrade(&acc);
         let acc = self.to_point_with_curvature(acc);
         let carry = self.ecc_non_zero_point_downgrade(&rand_acc_point_neg);
+        let res = self.ecc_add(&acc, &carry);
 
-        Ok(self.ecc_add(&acc, &carry))
+        Ok(res)
     }
 
     fn msm_unsafe(
