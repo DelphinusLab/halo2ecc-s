@@ -612,6 +612,9 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
     }
 
     fn ecc_double(&mut self, a: &AssignedPointWithCurvature<C, N>) -> AssignedPoint<C, N> {
+        // Ensure scalar is odd, so double-a can't be identity if a is not identity.
+        assert!(!(field_to_bn(&-C::ScalarExt::one()).bit(0)));
+
         let a_p = a.clone().to_point();
         let mut p = self.lambda_to_point(&a.curvature, &a_p, &a_p);
         p.z = self
@@ -689,6 +692,10 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
     }
 
     fn ecc_encode(&mut self, p: &AssignedPoint<C, N>) -> Vec<AssignedValue<N>> {
+        // Exceeding 3 limbs doesn't mean to be insecure,
+        // it is hard to find another point that has same 324 bits both on x and y.
+        // assert!(p.x.limbs_le.len() == 3);
+
         let p = self.ecc_reduce(&p);
         let shift = bn_to_field(
             &(BigUint::from(1u64) << self.base_integer_chip().range_chip().info().limb_bits),
@@ -715,6 +722,7 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         g: usize,
         offset: &mut usize,
     ) {
+        assert!(p.times == 1);
         let limb_size = self.base_integer_chip().range_chip().info().limbs;
         for j in 0..limb_size as usize {
             self.select_chip()
@@ -778,43 +786,13 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
         let c_z = self
             .select_chip()
             .assign_selected_value(&p.curvature.1 .0, i, g, sc);
-        // skip checking x y relation cause they are selected from well formed values
+        // skip checking x y relation because they are selected from well formed values
         AssignedPointWithCurvature {
             x,
             y,
             z: AssignedCondition(z),
             curvature: AssignedCurvature(c_v, AssignedCondition(c_z)),
         }
-    }
-
-    fn pick_candidate(
-        &mut self,
-        candidates: &Vec<AssignedPointWithCurvature<C, N>>,
-        group_bits: &Vec<AssignedCondition<N>>,
-    ) -> (AssignedValue<N>, AssignedPointWithCurvature<C, N>) {
-        let curr_candidates: Vec<_> = candidates.clone();
-        let mut group_bits = group_bits.clone();
-        group_bits.reverse();
-        let index = group_bits
-            .iter()
-            .fold((0, 0), |(i, s), x| {
-                if x.0.val == N::zero() {
-                    (i * 2, s + 1)
-                } else {
-                    (i * 2 + 1, s + 1)
-                }
-            })
-            .0;
-        let integer_chip = self.base_integer_chip();
-        let mut base_chip = integer_chip.base_chip();
-        let value_cell = base_chip.assign_constant(N::zero());
-        let one_cell = base_chip.assign_constant(N::one());
-        let index_cell = group_bits.iter().fold(value_cell, |acc, x| {
-            base_chip.mul_add(&x.0, &one_cell, N::one(), &acc, N::from(2u64))
-        });
-        //println!("index is: {:?}, cell is: {:?}", index, index_cell.val);
-        let ci = &curr_candidates[index];
-        (index_cell, ci.clone())
     }
 
     fn lambda_to_point_non_zero(
@@ -985,22 +963,6 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
     ) {
         self.base_integer_chip().assert_int_equal(&a.x, &b.x);
         self.base_integer_chip().assert_int_equal(&a.y, &b.y);
-    }
-
-    fn ecc_assert_non_zero_point(
-        &mut self,
-        a: &AssignedPoint<C, N>,
-    ) -> Result<AssignedNonZeroPoint<C, N>, UnsafeError> {
-        let succeed = self.base_integer_chip().base_chip().try_assert_false(&a.z);
-
-        if succeed {
-            Ok(AssignedNonZeroPoint {
-                x: a.x.clone(),
-                y: a.y.clone(),
-            })
-        } else {
-            Err(UnsafeError::AssignIdentity)
-        }
     }
 
     fn ecc_non_zero_point_downgrade(
