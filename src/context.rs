@@ -75,6 +75,53 @@ impl<N: FieldExt> Context<N> {
         }
     }
 
+    pub fn check_row_has_some(&self) {
+        for i in 0..self.base_offset {
+            let mut has_some = false;
+
+            for (_, v) in self.records.inner.base_fix_record[i].iter().enumerate() {
+                if v.is_some() {
+                    has_some = true;
+                }
+            }
+
+            if !has_some {
+                println!("no assigned fix in base chip at row {}", i);
+                assert!(false);
+            }
+        }
+
+        for i in 0..self.range_offset {
+            let mut has_some = false;
+
+            for (_, v) in self.records.inner.range_fix_record[i].iter().enumerate() {
+                if v.is_some() {
+                    has_some = true;
+                }
+            }
+
+            if !has_some {
+                println!("no assigned fix in range chip at row {}", i);
+                assert!(false);
+            }
+        }
+
+        for i in 0..self.select_offset {
+            let mut has_some = false;
+
+            for (_, v) in self.records.inner.select_fix_record[i].iter().enumerate() {
+                if v.is_some() {
+                    has_some = true;
+                }
+            }
+
+            if !has_some {
+                println!("no assigned fix in select chip at row {}", i);
+                assert!(false);
+            }
+        }
+    }
+
     pub fn dump_permutation(&self) {
         for (i, p) in self.records.permutations.iter().enumerate() {
             println!("permutation at {} is {:?}", i, p);
