@@ -281,3 +281,103 @@ pub const FROBENIUS_COEFF_FQ12_C1: [[[u8; 32]; 2]; 12] = [
         ],
     ],
 ];
+
+#[test]
+fn check_pairing_constant() {
+    use crate::utils::bn_to_field;
+    use halo2_proofs::pairing::bn256::Fq;
+    use num_bigint::BigUint;
+
+    println!("XI_TO_Q_MINUS_1_OVER_2");
+    for i in 0..XI_TO_Q_MINUS_1_OVER_2.len() {
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&XI_TO_Q_MINUS_1_OVER_2[i]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+        unsafe {
+            println!("Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+    }
+
+    assert!(bn_to_field::<Fq>(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ2_C1[1])) == -Fq::one());
+
+    println!("FROBENIUS_COEFF_FQ6_C1");
+    for i in 0..FROBENIUS_COEFF_FQ6_C1.len() {
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ6_C1[i][0]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+        unsafe {
+            println!("c0:Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ6_C1[i][1]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+        unsafe {
+            println!("c1:Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+    }
+
+    println!("FROBENIUS_COEFF_FQ6_C2");
+    for i in 0..FROBENIUS_COEFF_FQ6_C2.len() {
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ6_C2[i][0]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+        unsafe {
+            println!("c0:Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ6_C2[i][1]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+        unsafe {
+            println!("c1:Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+    }
+
+    println!("FROBENIUS_COEFF_FQ12_C1");
+    for i in 0..FROBENIUS_COEFF_FQ12_C1.len() {
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ12_C1[i][0]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+
+        unsafe {
+            println!("c0:Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+
+        let v: Fq = bn_to_field(&BigUint::from_bytes_le(&FROBENIUS_COEFF_FQ12_C1[i][1]));
+
+        let v_raw = &v as *const Fq as *const [u64; 4];
+
+        unsafe {
+            println!("c1:Fq([");
+            for j in 0..4 {
+                println!("{:#016x},", (*v_raw)[j]);
+            }
+            println!("]),");
+        }
+    }
+}
