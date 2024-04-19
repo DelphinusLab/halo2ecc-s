@@ -63,6 +63,7 @@ impl Offset {
 
 pub trait ParallelClone: Sized {
     fn apply_offset_diff(&mut self, offset_diff: &Offset);
+    // WARNING: clone() doesn't clone permutation relationship, so we have to use merge() to collect them
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self;
     fn clone_without_offset(&self) -> Self {
         self.clone_with_offset(&Offset {
