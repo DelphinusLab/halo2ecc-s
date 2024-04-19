@@ -48,6 +48,12 @@ impl<C: CurveAffine> EccBaseIntegerChipWrapper<C::Base, C::ScalarExt>
 impl<C: CurveAffine> EccChipBaseOps<C, C::ScalarExt> for NativeScalarEccContext<C> {}
 
 impl<C: CurveAffine> ParallelClone for NativeScalarEccContext<C> {
+    fn apply_offset_diff(&mut self, offset_diff: &Offset) {
+        self.0.ctx.borrow_mut().base_offset += offset_diff.base_offset_diff;
+        self.0.ctx.borrow_mut().range_offset += offset_diff.range_offset_diff;
+        self.0.ctx.borrow_mut().select_offset += offset_diff.select_offset_diff;
+    }
+
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
         let info = self.0.info.clone();
         let mut ctx = (*(*self.0.ctx).borrow()).clone_without_permutation();

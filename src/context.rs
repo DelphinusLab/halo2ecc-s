@@ -53,6 +53,36 @@ impl<N: FieldExt> Display for Context<N> {
 }
 
 impl<N: FieldExt> Context<N> {
+    pub fn dump_fix_value(&self, start: usize, end: usize) {
+        for i in start..end {
+            for (col, v) in self.records.inner.base_fix_record[i].iter().enumerate() {
+                if v.is_some() {
+                    println!("base_fix_record value at {} {} is {:?}", i, col, v);
+                }
+            }
+
+            for (col, v) in self.records.inner.range_fix_record[i].iter().enumerate() {
+                if v.is_some() {
+                    println!("range_fix_record value at {} {} is {:?}", i, col, v);
+                }
+            }
+
+            for (col, v) in self.records.inner.select_fix_record[i].iter().enumerate() {
+                if v.is_some() {
+                    println!("select_fix_record value at {} {} is {:?}", i, col, v);
+                }
+            }
+        }
+    }
+
+    pub fn dump_permutation(&self) {
+        for (i, p) in self.records.permutations.iter().enumerate() {
+            println!("permutation at {} is {:?}", i, p);
+        }
+    }
+}
+
+impl<N: FieldExt> Context<N> {
     pub fn new() -> Self {
         Self {
             records: Records::default(),
@@ -790,7 +820,11 @@ impl<N: FieldExt> Records<N> {
         } else {
             0
         };
-        self.assign_fix_cell_in_range_chip(offset + 1, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_fix_cell_in_range_chip(
+            offset + 1,
+            RangeFixColIndex::TagCol,
+            N::from(cell_bits),
+        );
         self.assign_adv_cell_in_range_chip(offset + 1, RangeAdvColIndex::TaggedRangeCol, v[3]);
 
         self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::ValueAccCol, v_acc);
@@ -839,7 +873,11 @@ impl<N: FieldExt> Records<N> {
         } else {
             0
         };
-        self.assign_fix_cell_in_range_chip(offset + 1, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_fix_cell_in_range_chip(
+            offset + 1,
+            RangeFixColIndex::TagCol,
+            N::from(cell_bits),
+        );
         self.assign_adv_cell_in_range_chip(offset + 1, RangeAdvColIndex::TaggedRangeCol, v[4]);
 
         let cell_bits = if bits > 5 * COMMON_RANGE_BITS {
@@ -847,7 +885,11 @@ impl<N: FieldExt> Records<N> {
         } else {
             0
         };
-        self.assign_fix_cell_in_range_chip(offset + 2, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_fix_cell_in_range_chip(
+            offset + 2,
+            RangeFixColIndex::TagCol,
+            N::from(cell_bits),
+        );
         self.assign_adv_cell_in_range_chip(offset + 2, RangeAdvColIndex::TaggedRangeCol, v[5]);
 
         self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::ValueAccCol, v_acc);

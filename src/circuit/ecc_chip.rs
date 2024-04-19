@@ -62,8 +62,9 @@ impl Offset {
 }
 
 pub trait ParallelClone: Sized {
+    fn apply_offset_diff(&mut self, offset_diff: &Offset);
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self;
-    fn clone(&self) -> Self {
+    fn clone_without_offset(&self) -> Self {
         self.clone_with_offset(&Offset {
             range_offset_diff: 0,
             base_offset_diff: 0,
@@ -147,7 +148,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
 
         // For parallel setup, we calculate the offset change on first round.
         // The diff should be same because all point are normalized.
-        let mut predict_ops = self.clone();
+        let mut predict_ops = self.clone_without_offset();
         let offset_before = predict_ops.offset();
         let mut line_acc_arr = {
             let mut acc = rand_acc_point_neg.clone();
@@ -199,7 +200,8 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         }
 
         // Set self offset to the tail and merge.
-        *self = self.clone_with_offset(&offset_diff.scale(windows));
+        self.apply_offset_diff(&offset_diff.scale(windows));
+
 
         let mut acc = rand_acc_point.clone();
         for wi in 0..windows {
@@ -284,7 +286,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
 
         // For parallel setup, we calculate the offset change on first round.
         // The diff should be same because all point are normalized.
-        let mut predict_ops = self.clone();
+        let mut predict_ops = self.clone_without_offset();
         let offset_before = predict_ops.offset();
         let mut line_acc_arr = {
             let mut acc = rand_acc_point_neg.clone();
@@ -344,7 +346,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         }
 
         // Set self offset to the tail and merge.
-        *self = self.clone_with_offset(&offset_diff.scale(windows));
+        self.apply_offset_diff(&offset_diff.scale(windows));
 
         // Accumulate points of all windows.
         let mut acc = rand_acc_point.clone();

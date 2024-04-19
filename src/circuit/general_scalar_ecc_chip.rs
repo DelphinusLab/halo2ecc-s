@@ -41,6 +41,12 @@ impl<C: CurveAffine, N: FieldExt> EccChipBaseOps<C, N> for GeneralScalarEccConte
 unsafe impl<C: CurveAffine, N: FieldExt> Send for GeneralScalarEccContext<C, N> {}
 
 impl<C: CurveAffine, N: FieldExt> ParallelClone for GeneralScalarEccContext<C, N> {
+    fn apply_offset_diff(&mut self, offset_diff: &Offset) {
+        self.native_ctx.borrow_mut().base_offset += offset_diff.base_offset_diff;
+        self.native_ctx.borrow_mut().range_offset += offset_diff.range_offset_diff;
+        self.native_ctx.borrow_mut().select_offset += offset_diff.select_offset_diff;
+    }
+
     fn clone_with_offset(&self, offset_diff: &Offset) -> Self {
         let mut ctx = (*(*self.native_ctx).borrow()).clone_without_permutation();
         ctx.base_offset += offset_diff.base_offset_diff;
