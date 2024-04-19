@@ -33,6 +33,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 const MAX_ROWS: usize = 1 << 23;
+const SANITY_CHECK: bool = false;
 
 #[derive(Debug, Clone)]
 pub struct Context<N: FieldExt> {
@@ -604,20 +605,24 @@ impl<N: FieldExt> Records<N> {
     }
 
     fn assign_adv_cell_in_base_chip(&mut self, offset: usize, col: usize, val: N) {
-        assert!(
-            self.inner.base_adv_record[offset][col as usize].0.is_none()
-                || self.inner.base_adv_record[offset][col as usize].0 == Some(val)
-        );
+        if SANITY_CHECK {
+            assert!(
+                self.inner.base_adv_record[offset][col as usize].0.is_none()
+                    || self.inner.base_adv_record[offset][col as usize].0 == Some(val)
+            );
+        }
 
         unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_adv_record[offset][col as usize]
             .0 = Some(val);
     }
 
     fn assign_fix_cell_in_base_chip(&mut self, offset: usize, col: usize, val: N) {
-        assert!(
-            self.inner.base_fix_record[offset][col as usize].is_none()
-                || self.inner.base_fix_record[offset][col as usize] == Some(val)
-        );
+        if SANITY_CHECK {
+            assert!(
+                self.inner.base_fix_record[offset][col as usize].is_none()
+                    || self.inner.base_fix_record[offset][col as usize] == Some(val)
+            );
+        }
 
         unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset][col as usize] =
             Some(val);
@@ -712,12 +717,14 @@ impl<N: FieldExt> Records<N> {
     }
 
     fn assign_adv_cell_in_select_chip(&mut self, offset: usize, col: SelectAdvColIndex, val: N) {
-        assert!(
-            self.inner.select_adv_record[offset][col as usize]
-                .0
-                .is_none()
-                || self.inner.select_adv_record[offset][col as usize].0 == Some(val)
-        );
+        if SANITY_CHECK {
+            assert!(
+                self.inner.select_adv_record[offset][col as usize]
+                    .0
+                    .is_none()
+                    || self.inner.select_adv_record[offset][col as usize].0 == Some(val)
+            );
+        }
 
         unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_adv_record[offset]
             [col as usize]
@@ -725,10 +732,12 @@ impl<N: FieldExt> Records<N> {
     }
 
     fn assign_fix_cell_in_select_chip(&mut self, offset: usize, col: SelectFixColIndex, val: N) {
-        assert!(
-            self.inner.select_fix_record[offset][col as usize].is_none()
-                || self.inner.select_fix_record[offset][col as usize] == Some(val)
-        );
+        if SANITY_CHECK {
+            assert!(
+                self.inner.select_fix_record[offset][col as usize].is_none()
+                    || self.inner.select_fix_record[offset][col as usize] == Some(val)
+            );
+        }
 
         unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_fix_record[offset]
             [col as usize] = Some(val);
@@ -789,22 +798,32 @@ impl<N: FieldExt> Records<N> {
     }
 
     fn assign_adv_cell_in_range_chip(&mut self, offset: usize, col: RangeAdvColIndex, val: N) {
-        assert!(
-            self.inner.range_adv_record[offset][col as usize]
-                .0
-                .is_none()
-                || self.inner.range_adv_record[offset][col as usize].0 == Some(val)
-        );
+        if SANITY_CHECK {
+            assert!(
+                self.inner.range_adv_record[offset][col as usize]
+                    .0
+                    .is_none()
+                    || self.inner.range_adv_record[offset][col as usize].0 == Some(val)
+            );
+        }
 
         unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset][col as usize]
             .0 = Some(val);
     }
 
     fn assign_fix_cell_in_range_chip(&mut self, offset: usize, col: RangeFixColIndex, val: N) {
-        assert!(
-            self.inner.range_fix_record[offset][col as usize].is_none()
-                || self.inner.range_fix_record[offset][col as usize] == Some(val)
-        );
+        if SANITY_CHECK {
+            if col == RangeFixColIndex::AccLinesCol {
+                assert!(val == N::one() || val == N::from(2u64) || val == N::from(3u64));
+            } else {
+                assert!(val <= N::from(COMMON_RANGE_BITS));
+            }
+
+            assert!(
+                self.inner.range_fix_record[offset][col as usize].is_none()
+                    || self.inner.range_fix_record[offset][col as usize] == Some(val)
+            );
+        }
 
         unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset][col as usize] =
             Some(val);

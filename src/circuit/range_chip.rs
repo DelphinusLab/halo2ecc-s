@@ -85,7 +85,7 @@ pub enum RangeAdvColIndex {
     CommonRangeCol = 2,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum RangeFixColIndex {
     AccLinesCol = 0,
     TagCol = 1,
