@@ -78,12 +78,14 @@ pub struct RangeChip<N: FieldExt> {
     pub _phantom: PhantomData<N>,
 }
 
+#[derive(Clone, Copy)]
 pub enum RangeAdvColIndex {
     ValueAccCol = 0,
     TaggedRangeCol = 1,
     CommonRangeCol = 2,
 }
 
+#[derive(Clone, Copy)]
 pub enum RangeFixColIndex {
     AccLinesCol = 0,
     TagCol = 1,

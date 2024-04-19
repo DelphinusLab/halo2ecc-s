@@ -12,7 +12,9 @@ use crate::circuit::range_chip::RangeFixColIndex;
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
 use crate::circuit::range_chip::RANGE_CHIP_ADV_COLUMNS;
 use crate::circuit::range_chip::RANGE_CHIP_FIX_COLUMNS;
+use crate::circuit::select_chip::SelectAdvColIndex;
 use crate::circuit::select_chip::SelectChip;
+use crate::circuit::select_chip::SelectFixColIndex;
 use crate::range_info::RangeInfo;
 
 use ark_std::end_timer;
@@ -233,14 +235,14 @@ impl<N: FieldExt> Records<N> {
             || Ok(N::zero()),
         )?;
 
-        let fixed_cell = region.assign_fixed(
+        let fix_cell = region.assign_fixed(
             || "base",
             base_chip.config.coeff[0],
             max_row,
             || Ok(N::zero()),
         )?;
 
-        Ok(adv_cell.value().is_none() && fixed_cell.value().is_none())
+        Ok(adv_cell.value().is_none() && fix_cell.value().is_none())
     }
 
     fn _assign_to_base_chip(
@@ -373,7 +375,7 @@ impl<N: FieldExt> Records<N> {
             .enumerate()
             .take(self.select_height)
         {
-            if advs[0].0.is_some() {
+            if advs[SelectAdvColIndex::ValueCol as usize].0.is_some() {
                 let cell = region.assign_advice(
                     || "select limb_info col",
                     select_chip.config.limb_info,
@@ -384,7 +386,7 @@ impl<N: FieldExt> Records<N> {
                     cells[0][row] = Some(cell);
                 }
             }
-            if advs[1].0.is_some() {
+            if advs[SelectAdvColIndex::SelectCol as usize].0.is_some() {
                 let cell = region.assign_advice(
                     || "select selector col",
                     select_chip.config.selector,
@@ -404,7 +406,7 @@ impl<N: FieldExt> Records<N> {
             .enumerate()
             .take(self.select_height)
         {
-            if fixes[0].is_some() {
+            if fixes[SelectFixColIndex::EncodeCol as usize].is_some() {
                 region.assign_fixed(
                     || "encoded offset",
                     select_chip.config.encoded_offset,
@@ -412,7 +414,7 @@ impl<N: FieldExt> Records<N> {
                     || Ok(fixes[0].unwrap()),
                 )?;
             }
-            if fixes[1].is_some() {
+            if fixes[SelectFixColIndex::IsLookupCol as usize].is_some() {
                 region.assign_fixed(
                     || "is_lookup",
                     select_chip.config.is_lookup,
@@ -442,17 +444,6 @@ impl<N: FieldExt> Records<N> {
         }
 
         Ok(())
-    }
-
-    pub fn assign_all_in_base(
-        &self,
-        region: &Region<'_, N>,
-        base_chip: &BaseChip<N>,
-    ) -> Result<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>, Error> {
-        let cells = self._assign_to_base_chip(region, base_chip)?;
-        let cells = vec![cells];
-        self._assign_permutation(region, &cells)?;
-        Ok(cells)
     }
 
     pub fn assign_all_opt(
@@ -535,6 +526,26 @@ impl<N: FieldExt> Records<N> {
         }
     }
 
+    fn assign_adv_cell_in_base_chip(&mut self, offset: usize, col: usize, val: N) {
+        assert!(
+            self.inner.base_adv_record[offset][col as usize].0.is_none()
+                || self.inner.base_adv_record[offset][col as usize].0 == Some(val)
+        );
+
+        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_adv_record[offset][col as usize]
+            .0 = Some(val);
+    }
+
+    fn assign_fix_cell_in_base_chip(&mut self, offset: usize, col: usize, val: N) {
+        assert!(
+            self.inner.base_fix_record[offset][col as usize].is_none()
+                || self.inner.base_fix_record[offset][col as usize] == Some(val)
+        );
+
+        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset][col as usize] =
+            Some(val);
+    }
+
     pub fn one_line(
         &mut self,
         offset: usize,
@@ -551,36 +562,38 @@ impl<N: FieldExt> Records<N> {
         for (i, (base, coeff)) in base_coeff_pairs.into_iter().enumerate() {
             match base.cell() {
                 Some(cell) => {
-                    let idx = Cell::new(Chip::BaseChip, i, offset);
+                    let new_cell = Cell::new(Chip::BaseChip, i, offset);
 
-                    unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_adv_record[offset][i]
-                        .1 = true;
+                    self.enable_permute(&new_cell);
                     self.enable_permute(&cell);
 
-                    self.permutations.push((cell, idx));
+                    self.permutations.push((cell, new_cell));
                 }
                 _ => {}
             }
-            unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset][i] =
-                Some(coeff);
-            unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_adv_record[offset][i].0 =
-                Some(base.value());
+            self.assign_adv_cell_in_base_chip(offset, i, base.value());
+            self.assign_fix_cell_in_base_chip(offset, i, coeff);
         }
 
         let (mul_coeffs, next) = mul_next_coeffs;
         for (i, mul_coeff) in mul_coeffs.into_iter().enumerate() {
-            unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset]
-                [VAR_COLUMNS + i] = Some(mul_coeff);
+            self.assign_fix_cell_in_base_chip(offset, VAR_COLUMNS + i, mul_coeff);
         }
 
         if next.is_some() {
-            unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset]
-                [VAR_COLUMNS + MUL_COLUMNS] = next;
+            self.assign_fix_cell_in_base_chip(offset, VAR_COLUMNS + MUL_COLUMNS, next.unwrap());
+        } else {
+            assert!(self.inner.base_fix_record[offset][VAR_COLUMNS + MUL_COLUMNS].is_none());
         }
 
         if constant.is_some() {
-            unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset]
-                [VAR_COLUMNS + MUL_COLUMNS + 1] = constant;
+            self.assign_fix_cell_in_base_chip(
+                offset,
+                VAR_COLUMNS + MUL_COLUMNS + 1,
+                constant.unwrap(),
+            );
+        } else {
+            assert!(self.inner.base_fix_record[offset][VAR_COLUMNS + MUL_COLUMNS + 1].is_none());
         }
     }
 
@@ -601,19 +614,18 @@ impl<N: FieldExt> Records<N> {
         let i = VAR_COLUMNS - 1;
         match base.cell() {
             Some(cell) => {
-                let idx = Cell::new(Chip::BaseChip, i, offset);
+                let new_cell = Cell::new(Chip::BaseChip, i, offset);
 
-                unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_adv_record[offset][i].1 =
-                    true;
+                self.enable_permute(&new_cell);
                 self.enable_permute(&cell);
 
-                self.permutations.push((cell, idx));
+                self.permutations.push((cell, new_cell));
             }
             _ => {}
         }
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_fix_record[offset][i] = Some(coeff);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.base_adv_record[offset][i].0 =
-            Some(base.value());
+
+        self.assign_adv_cell_in_base_chip(offset, i, base.value());
+        self.assign_fix_cell_in_base_chip(offset, i, coeff);
     }
 
     fn ensure_range_record_size(&mut self, offset: usize) {
@@ -622,22 +634,47 @@ impl<N: FieldExt> Records<N> {
         }
     }
 
+    fn assign_adv_cell_in_select_chip(&mut self, offset: usize, col: SelectAdvColIndex, val: N) {
+        assert!(
+            self.inner.select_adv_record[offset][col as usize]
+                .0
+                .is_none()
+                || self.inner.select_adv_record[offset][col as usize].0 == Some(val)
+        );
+
+        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_adv_record[offset]
+            [col as usize]
+            .0 = Some(val);
+    }
+
+    fn assign_fix_cell_in_select_chip(&mut self, offset: usize, col: SelectFixColIndex, val: N) {
+        assert!(
+            self.inner.select_fix_record[offset][col as usize].is_none()
+                || self.inner.select_fix_record[offset][col as usize] == Some(val)
+        );
+
+        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_fix_record[offset]
+            [col as usize] = Some(val);
+    }
+
     pub fn assign_cache_value(&mut self, offset: usize, v: &AssignedValue<N>, encode: N) {
         if offset >= self.select_height {
             self.select_height = offset + 1;
         }
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_adv_record[offset][0].0 =
-            Some(v.val);
-        let idx = Cell::new(Chip::SelectChip, 0, offset);
+        self.assign_adv_cell_in_select_chip(offset, SelectAdvColIndex::ValueCol, v.val);
+        let idx = Cell::new(
+            Chip::SelectChip,
+            SelectAdvColIndex::ValueCol as usize,
+            offset,
+        );
         self.permutations.push((idx, v.cell));
         self.enable_permute(&idx);
         self.enable_permute(&v.cell);
         // assign encode
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_fix_record[offset][0] =
-            Some(encode);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_fix_record[offset][1] =
-            Some(N::zero());
+
+        self.assign_fix_cell_in_select_chip(offset, SelectFixColIndex::EncodeCol, encode);
+        self.assign_fix_cell_in_select_chip(offset, SelectFixColIndex::IsLookupCol, N::zero());
     }
 
     pub fn assign_select_value(
@@ -651,20 +688,49 @@ impl<N: FieldExt> Records<N> {
             self.select_height = offset + 1;
         }
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_adv_record[offset][0].0 =
-            Some(v.val);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_adv_record[offset][1].0 =
-            Some(selector.val);
-        let selector_cell = Cell::new(Chip::SelectChip, 1, offset);
+        self.assign_adv_cell_in_select_chip(offset, SelectAdvColIndex::ValueCol, v.val);
+        self.assign_adv_cell_in_select_chip(offset, SelectAdvColIndex::SelectCol, selector.val);
+
+        let selector_cell = Cell::new(
+            Chip::SelectChip,
+            SelectAdvColIndex::SelectCol as usize,
+            offset,
+        );
         self.permutations.push((selector_cell, selector.cell));
         self.enable_permute(&selector_cell);
         self.enable_permute(&selector.cell);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_fix_record[offset][0] =
-            Some(encode);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.select_fix_record[offset][1] =
-            Some(N::one());
 
-        AssignedValue::new(Chip::SelectChip, 0, offset, v.val)
+        self.assign_fix_cell_in_select_chip(offset, SelectFixColIndex::EncodeCol, encode);
+        self.assign_fix_cell_in_select_chip(offset, SelectFixColIndex::IsLookupCol, N::one());
+
+        AssignedValue::new(
+            Chip::SelectChip,
+            SelectAdvColIndex::ValueCol as usize,
+            offset,
+            v.val,
+        )
+    }
+
+    fn assign_adv_cell_in_range_chip(&mut self, offset: usize, col: RangeAdvColIndex, val: N) {
+        assert!(
+            self.inner.range_adv_record[offset][col as usize]
+                .0
+                .is_none()
+                || self.inner.range_adv_record[offset][col as usize].0 == Some(val)
+        );
+
+        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset][col as usize]
+            .0 = Some(val);
+    }
+
+    fn assign_fix_cell_in_range_chip(&mut self, offset: usize, col: RangeFixColIndex, val: N) {
+        assert!(
+            self.inner.range_fix_record[offset][col as usize].is_none()
+                || self.inner.range_fix_record[offset][col as usize] == Some(val)
+        );
+
+        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset][col as usize] =
+            Some(val);
     }
 
     pub fn assign_one_line_range_value(
@@ -678,17 +744,10 @@ impl<N: FieldExt> Records<N> {
         assert!(bits <= COMMON_RANGE_BITS);
         self.ensure_range_record_size(offset + 1);
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset]
-            [RangeFixColIndex::AccLinesCol as usize] = Some(N::one());
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset]
-            [RangeFixColIndex::TagCol as usize] = Some(N::from(bits));
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::TaggedRangeCol as usize]
-            .0 = Some(v[0]);
-
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::ValueAccCol as usize]
-            .0 = Some(v_acc);
+        self.assign_fix_cell_in_range_chip(offset, RangeFixColIndex::AccLinesCol, N::one());
+        self.assign_fix_cell_in_range_chip(offset, RangeFixColIndex::TagCol, N::from(bits));
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::TaggedRangeCol, v[0]);
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::ValueAccCol, v_acc);
 
         AssignedValue::new(
             Chip::RangeChip,
@@ -709,41 +768,32 @@ impl<N: FieldExt> Records<N> {
         assert!(bits <= COMMON_RANGE_BITS * 4);
         self.ensure_range_record_size(offset + 2);
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset]
-            [RangeFixColIndex::AccLinesCol as usize] = Some(N::one() + N::one());
+        self.assign_fix_cell_in_range_chip(
+            offset,
+            RangeFixColIndex::AccLinesCol,
+            N::one() + N::one(),
+        );
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::CommonRangeCol as usize]
-            .0 = Some(v[0]);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset + 1]
-            [RangeAdvColIndex::CommonRangeCol as usize]
-            .0 = Some(v[1]);
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::CommonRangeCol, v[0]);
+        self.assign_adv_cell_in_range_chip(offset + 1, RangeAdvColIndex::CommonRangeCol, v[1]);
 
         let cell_bits = if bits >= 3 * COMMON_RANGE_BITS {
             COMMON_RANGE_BITS
         } else {
             bits % COMMON_RANGE_BITS
         };
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset]
-            [RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::TaggedRangeCol as usize]
-            .0 = Some(v[2]);
+        self.assign_fix_cell_in_range_chip(offset, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::TaggedRangeCol, v[2]);
 
         let cell_bits = if bits > 3 * COMMON_RANGE_BITS {
             bits - 3 * COMMON_RANGE_BITS
         } else {
             0
         };
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset + 1]
-            [RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset + 1]
-            [RangeAdvColIndex::TaggedRangeCol as usize]
-            .0 = Some(v[3]);
+        self.assign_fix_cell_in_range_chip(offset + 1, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_adv_cell_in_range_chip(offset + 1, RangeAdvColIndex::TaggedRangeCol, v[3]);
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::ValueAccCol as usize]
-            .0 = Some(v_acc);
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::ValueAccCol, v_acc);
 
         AssignedValue::new(
             Chip::RangeChip,
@@ -764,29 +814,23 @@ impl<N: FieldExt> Records<N> {
         assert!(bits <= COMMON_RANGE_BITS * 6);
         self.ensure_range_record_size(offset + 3);
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset]
-            [RangeFixColIndex::AccLinesCol as usize] = Some(N::one() + N::one() + N::one());
+        self.assign_fix_cell_in_range_chip(
+            offset,
+            RangeFixColIndex::AccLinesCol,
+            N::one() + N::one() + N::one(),
+        );
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::CommonRangeCol as usize]
-            .0 = Some(v[0]);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset + 1]
-            [RangeAdvColIndex::CommonRangeCol as usize]
-            .0 = Some(v[1]);
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset + 2]
-            [RangeAdvColIndex::CommonRangeCol as usize]
-            .0 = Some(v[2]);
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::CommonRangeCol, v[0]);
+        self.assign_adv_cell_in_range_chip(offset + 1, RangeAdvColIndex::CommonRangeCol, v[1]);
+        self.assign_adv_cell_in_range_chip(offset + 2, RangeAdvColIndex::CommonRangeCol, v[2]);
 
         let cell_bits = if bits >= 4 * COMMON_RANGE_BITS {
             COMMON_RANGE_BITS
         } else {
             bits % COMMON_RANGE_BITS
         };
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset]
-            [RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::TaggedRangeCol as usize]
-            .0 = Some(v[3]);
+        self.assign_fix_cell_in_range_chip(offset, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::TaggedRangeCol, v[3]);
 
         let cell_bits = if bits >= 5 * COMMON_RANGE_BITS {
             COMMON_RANGE_BITS
@@ -795,26 +839,18 @@ impl<N: FieldExt> Records<N> {
         } else {
             0
         };
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset + 1]
-            [RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset + 1]
-            [RangeAdvColIndex::TaggedRangeCol as usize]
-            .0 = Some(v[4]);
+        self.assign_fix_cell_in_range_chip(offset + 1, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_adv_cell_in_range_chip(offset + 1, RangeAdvColIndex::TaggedRangeCol, v[4]);
 
         let cell_bits = if bits > 5 * COMMON_RANGE_BITS {
             bits - 5 * COMMON_RANGE_BITS
         } else {
             0
         };
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_fix_record[offset + 2]
-            [RangeFixColIndex::TagCol as usize] = Some(N::from(cell_bits));
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset + 2]
-            [RangeAdvColIndex::TaggedRangeCol as usize]
-            .0 = Some(v[5]);
+        self.assign_fix_cell_in_range_chip(offset + 2, RangeFixColIndex::TagCol, N::from(cell_bits));
+        self.assign_adv_cell_in_range_chip(offset + 2, RangeAdvColIndex::TaggedRangeCol, v[5]);
 
-        unsafe { Arc::get_mut_unchecked(&mut self.inner) }.range_adv_record[offset]
-            [RangeAdvColIndex::ValueAccCol as usize]
-            .0 = Some(v_acc);
+        self.assign_adv_cell_in_range_chip(offset, RangeAdvColIndex::ValueAccCol, v_acc);
 
         AssignedValue::new(
             Chip::RangeChip,

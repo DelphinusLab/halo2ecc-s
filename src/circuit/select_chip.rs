@@ -39,6 +39,18 @@ pub struct SelectChip<N: FieldExt> {
     pub _phantom: PhantomData<N>,
 }
 
+#[derive(Clone, Copy)]
+pub enum SelectAdvColIndex {
+    ValueCol = 0,
+    SelectCol = 1,
+}
+
+#[derive(Clone, Copy)]
+pub enum SelectFixColIndex {
+    EncodeCol = 0,
+    IsLookupCol = 1,
+}
+
 impl<N: FieldExt> SelectChip<N> {
     pub fn new(config: SelectChipConfig) -> Self {
         SelectChip {
