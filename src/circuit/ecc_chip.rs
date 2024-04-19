@@ -202,7 +202,6 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         // Set self offset to the tail and merge.
         self.apply_offset_diff(&offset_diff.scale(windows));
 
-
         let mut acc = rand_acc_point.clone();
         for wi in 0..windows {
             acc = self.ecc_double_unsafe(&acc)?;
@@ -320,7 +319,10 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
                 let offset_before = op.offset();
                 let mut acc = rand_acc_point_neg.clone();
                 for group_index in 0..groups.len() {
-                    let group_bits = groups[group_index].iter().map(|bits| bits[*wi][0]).collect();
+                    let group_bits = groups[group_index]
+                        .iter()
+                        .map(|bits| bits[*wi][0])
+                        .collect();
                     let (index_cell, ci) =
                         op.pick_candidate_non_zero(&candidates[group_index], &group_bits);
                     let ci = op.assign_selected_point_non_zero(
@@ -378,7 +380,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         let mut non_zero_points = vec![];
         let mut normalized_scalars = vec![];
         let non_zero_p = self.assign_non_zero_point(&C::generator().to_curve());
-        let s_zero = self.ecc_assign_zero_scalar();
+        let s_zero = self.ecc_assign_constant_zero_scalar();
 
         for (p, s) in points.iter().zip(scalars.iter()) {
             let s = self.ecc_bisec_scalar(&p.z, &s_zero, s);
@@ -423,7 +425,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         b: &Self::AssignedScalar,
     ) -> Self::AssignedScalar;
 
-    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar;
+    fn ecc_assign_constant_zero_scalar(&mut self) -> Self::AssignedScalar;
 }
 
 pub trait EccBaseIntegerChipWrapper<W: BaseExt, N: FieldExt> {

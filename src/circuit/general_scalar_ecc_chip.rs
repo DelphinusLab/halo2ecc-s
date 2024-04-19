@@ -162,7 +162,7 @@ impl<C: CurveAffine, N: FieldExt> EccChipScalarOps<C, N> for GeneralScalarEccCon
         self.scalar_integer_ctx.bisec_int(cond, a, b)
     }
 
-    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar {
+    fn ecc_assign_constant_zero_scalar(&mut self) -> Self::AssignedScalar {
         self.scalar_integer_ctx
             .assign_int_constant(C::ScalarExt::zero())
     }

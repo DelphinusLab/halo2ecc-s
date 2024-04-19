@@ -186,7 +186,7 @@ impl<C: CurveAffine> EccChipScalarOps<C, C::ScalarExt> for NativeScalarEccContex
         self.base_integer_chip().base_chip().bisec(cond, a, b)
     }
 
-    fn ecc_assign_zero_scalar(&mut self) -> Self::AssignedScalar {
+    fn ecc_assign_constant_zero_scalar(&mut self) -> Self::AssignedScalar {
         self.base_integer_chip()
             .base_chip()
             .assign_constant(C::ScalarExt::zero())
