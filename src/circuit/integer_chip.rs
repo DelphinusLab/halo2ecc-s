@@ -79,7 +79,7 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
     ) {
         assert!(a.times < self.info().overflow_limit);
         assert!(b.times < self.info().overflow_limit);
-        assert!(rem.times < self.info().overflow_limit);
+        assert!(rem.times == 1);
 
         let info = self.info();
         let one = N::one();

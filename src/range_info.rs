@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 use crate::circuit::range_chip::COMMON_RANGE_BITS;
 use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE;
-use crate::circuit::range_chip::RANGE_VALUE_DECOMPOSE_COMMON_PARTS;
+use crate::context::OVERFLOW_BITS;
 use crate::utils::bn_to_field;
 use crate::utils::field_to_bn;
 
@@ -55,25 +55,34 @@ pub struct RangeInfo<W: BaseExt, N: FieldExt> {
 
 impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
     fn bits_to_leading_bits_and_decompose(bits: u64, common_bits: u64) -> (u64, u64) {
-        // Ensure leading chunk is placed at tagged range column.
-        assert!(bits > RANGE_VALUE_DECOMPOSE_COMMON_PARTS * common_bits);
-
-        let leading_chunk_bits = bits % common_bits;
-        if leading_chunk_bits == 0 {
-            (common_bits, bits / common_bits % RANGE_VALUE_DECOMPOSE)
+        let common_limb_bits = RANGE_VALUE_DECOMPOSE * common_bits;
+        let leading_bits = if bits % common_limb_bits == 0 {
+            common_limb_bits
         } else {
-            (
-                leading_chunk_bits,
-                bits / common_bits % RANGE_VALUE_DECOMPOSE + 1,
-            )
+            bits % common_limb_bits
+        };
+
+        // Ensure leading chunk can be placed in 2-line or 3-line range.
+        assert!(leading_bits >= 2 * common_bits);
+        assert!(leading_bits <= RANGE_VALUE_DECOMPOSE * common_bits);
+
+        let leading_chunk_bits = leading_bits % common_bits;
+        if leading_chunk_bits == 0 {
+            (common_bits, leading_bits / common_bits)
+        } else {
+            (leading_chunk_bits, leading_bits / common_bits + 1)
         }
     }
 
     pub fn new(common_bits: u64, overflow_bits: u64) -> Self {
+        // Add assert to make it easy to review.
+        assert_eq!(common_bits, COMMON_RANGE_BITS);
+        assert_eq!(overflow_bits, OVERFLOW_BITS);
+
         let w_max = field_to_bn(&-W::one());
         let w_ceil_bits = w_max.bits();
         assert!(BigUint::from(1u64) << w_ceil_bits > w_max);
-        assert!(BigUint::from(1u64) << (w_ceil_bits - 1) < w_max);
+        assert!(BigUint::from(1u64) << (w_ceil_bits - 1) <= w_max);
         let (w_ceil_leading_bits, w_ceil_leading_decompose) =
             Self::bits_to_leading_bits_and_decompose(w_ceil_bits, common_bits);
 
@@ -177,89 +186,130 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
     fn pre_check(&self) {
         let common_modulus = 1u64 << COMMON_RANGE_BITS;
 
-        // is_pure_w_modulus():
-        // lcm(limb, native) >= w_ceil
-        let limb_check_modulus = BigUint::from(1u64) << (self.limb_bits * self.pure_w_check_limbs);
-        let lcm = self.n_modulus.lcm(&limb_check_modulus);
-        assert!(lcm >= self.w_ceil);
+        {
+            // is_pure_w_modulus():
+            // lcm(limb, native) >= w_ceil
+            let limb_check_modulus =
+                BigUint::from(1u64) << (self.limb_bits * self.pure_w_check_limbs);
+            let lcm = self.n_modulus.lcm(&limb_check_modulus);
+            assert!(lcm >= self.w_ceil);
+        }
 
-        // reduce():
-        // lcm(limb ^ reduce_check_limbs, native) >= w_ceil * self.overflow_limit
-        let limb_modulus = BigUint::from(1u64) << (self.limb_bits * self.reduce_check_limbs);
-        let lcm = self.n_modulus.lcm(&limb_modulus);
-        assert!(lcm >= &self.w_ceil * self.overflow_limit);
-        // Ensure that d can be assigned by assign_common.
-        assert!(COMMON_RANGE_BITS > self.overflow_bits);
-        // Ensure that v can be assigned by assign_nonleading_limb
-        assert!(
-            &((BigUint::from(1u64) << COMMON_RANGE_BITS) + 2u64 + self.overflow_bits)
-                <= &self.limb_modulus
-        );
-        // Ensure that v * limb_modulus would not overflow
-        assert!(&(&self.limb_modulus * &self.limb_modulus) < &self.n_modulus);
+        {
+            // reduce():
+            // a = d * w + rem
+            let max_a = &self.w_ceil * (self.overflow_limit - 1) - 1u64;
+            let max_d = (BigUint::from(1u64) << COMMON_RANGE_BITS) - 1u64;
+            // For completeness of d
+            // max(a) <= max(d) * w + min(rem)
+            assert!(max_a <= &max_d * &self.w_modulus);
+            // For soundness of d
+            // lcm(limb ^ reduce_check_limbs, native) >= max(d) * w + max(rem)
+            let limb_modulus = BigUint::from(1u64) << (self.limb_bits * self.reduce_check_limbs);
+            let lcm = self.n_modulus.lcm(&limb_modulus);
+            assert!(lcm >= &max_d * &self.w_modulus + &self.w_ceil);
+            // In each limb_modulus check:
+            // v * limb_modulus =
+            //   d * w[i] + rem[i] - a[i] + last_v + overflow_limit * limb_modulus - borrowed[i]
+            // For completeness of v
+            // max(v) * limb_modulus >= max_d * max(w[i]) + max(rem[i]) + max(v) + overflow_limit * limb_modulus
+            let max_v = &self.limb_modulus - 1u64;
+            let max_wi = self
+                .w_modulus_limbs_le_bn
+                .iter()
+                .reduce(|acc, x| acc.max(x))
+                .unwrap();
+            let max_rem = &self.limb_modulus - 1u64;
+            assert!(
+                &max_v * &self.limb_modulus
+                    >= &max_d * max_wi
+                        + &max_rem
+                        + &max_v
+                        + &self.overflow_limit * &self.limb_modulus
+            );
+            // Ensure no overflow
+            // max(v) * limb_modulus < n_modulus
+            // max_d * max(w[i]) + max(v) + overflow_limit * limb_modulus < n_modulus
+            // overflow_limit * limb_modulus - overflow_limit >= max(a[i])
+            assert!(&max_v * &self.limb_modulus < self.n_modulus);
+            assert!(
+                &max_d * max_wi + &max_rem + &max_v + &self.overflow_limit * &self.limb_modulus
+                    < self.n_modulus
+            );
+            let max_ai = &self.limb_modulus * (self.overflow_limit - 1) - 1u64;
+            assert!(&self.overflow_limit * &self.limb_modulus - &self.overflow_limit >= max_ai)
+        }
 
-        // mul():
-        // lcm(integer_modulus, native) >= w_ceil * w_ceil * self.overflow_limit * self.overflow_limit
-        let lcm = self
-            .n_modulus
-            .lcm(&(BigUint::from(1u64) << (self.limb_bits * self.mul_check_limbs)));
-        let max_a = &self.w_modulus * self.overflow_limit;
-        let max_b = &self.w_modulus * self.overflow_limit;
-        let max_l = max_a * max_b;
-        let max_d = &self.max_d;
-        let max_w = &self.w_modulus;
-        let max_rem = &self.w_ceil;
-        let max_r = max_d * max_w + max_rem;
-        assert!(max_l <= lcm);
-        assert!(max_r <= lcm);
-        assert!(max_l <= max_r);
-        // On each check limb,
-        // To ensure positive, we borrow
-        // `limbs * limb_modulus * limb_modulus + limb_modulus + limb_modulus`
-        // The last limb_modulus is reserved for previous borrow
+        {
+            // mul():
+            // a * b = d * w + rem
+            let max_a = &self.w_ceil * (self.overflow_limit - 1) - 1u64;
+            let max_b = &max_a;
+            let max_d = (BigUint::from(1u64) << self.d_bits) - 1u64;
+            // For completeness of d
+            // max(a) * max(b) <= max(d) * w + min(rem)
+            assert!(&max_a * max_b <= &max_d * &self.w_modulus);
+            // For soundness of d
+            // lcm(limb_modulus ^ mul_check_limbs, native) >= max(d) * w + max(rem)
+            let lcm = self
+                .n_modulus
+                .lcm(&(BigUint::from(1u64) << (self.limb_bits * self.mul_check_limbs)));
+            let max_rem = &self.w_ceil - 1u64;
+            assert!(lcm > &max_a * max_b);
+            assert!(lcm > &max_d * &self.w_modulus + &max_rem);
 
-        // `sum(a.limb * b.limb) - sum(d.limb * w.limb) - rem + borrow + carry = v * limb_modulus`
-        // max(v) =
-        // (overflow_limit * overflow_limit * limb_modulus + limbs * limb_modulus + 2) * 2
-        // Here we multiply 2 to briefly calculate the carry.
-        // Indeed, it should be very small.
+            // On i-th mul_check_limbs,
+            // borrow = limbs * limb_modulus + 2
+            // v * limb_modulus =
+            //   sum(j, a[j] * b[i-j]) - sum(j, d[j] * w[i-j]) - rem[i] + limb_modulus * borrow - borrowed[i]
 
-        // Split v into v_h * limb_modulus + v_l
-        // max(v_h) = (overflow_limit * overflow_limit * limbs + limbs + 2) * 2
+            let borrow = &self.limbs * &self.limb_modulus + 2u64;
+            // To avoid sub overflow
+            // limb_modulus * borrow - borrow >= max(sum(j, d[j] * w[i-j])) + max(rem[i])
+            // limb_modulus * borrow - borrow >= limbs * max(d[j]) * max(w[j]) + max(rem[i])
+            let max_d_j = &self.limb_modulus - 1u64;
+            let max_w_j = self
+                .w_modulus_limbs_le_bn
+                .iter()
+                .reduce(|acc, x| acc.max(x))
+                .unwrap();
+            let max_rem_i = &self.limb_modulus - 1u64;
+            assert!(
+                &borrow * &self.limb_modulus - &borrow
+                    >= self.limbs * max_d_j * max_w_j + max_rem_i
+            );
 
-        // Ensure max(v_h) < common_modulus
-        assert!(
-            common_modulus
-                > (self.limbs * self.overflow_limit * self.overflow_limit + self.limbs + 2) * 2
-        );
+            // For completeness of v
+            // max(v) * limb_modulus >= max(sum(j, a[j] * b[i-j])) + limb_modulus * borrow
+            // <- max(v) * limb_modulus >= limbs * max_a_j * max_b_j + limb_modulus * borrow
+            let max_v = &self.limb_modulus * common_modulus - 1u64;
+            let max_a_j = &self.limb_modulus * (self.overflow_limit - 1);
+            let max_b_j = &max_a_j;
+            assert!(&max_v * &self.limb_modulus >= &max_a_j * max_b_j * self.limbs + &self.limb_modulus * &borrow);
 
-        // Ensure sum limbs non-overflow
-        let sum_limb_max = self.limbs
-            * (self.overflow_limit * self.overflow_limit + 1)
-            * &self.limb_modulus
-            * &self.limb_modulus;
-        assert!(sum_limb_max < self.n_modulus);
-
-        // Ensure non-overflow for one limb sum check, i.e. `v * limb_modulus`.
-        assert!(&self.limb_modulus * &self.limb_modulus * common_modulus < self.n_modulus);
+            // To avoid overflow
+            // max(v) * limb_modulus < n_modulus
+            assert!(&max_v * &self.limb_modulus < self.n_modulus);
+        }
 
         // Algorithm limitation
         assert!(self.limbs >= 3);
     }
 
     pub fn d_bits(overflow_bits: u64) -> u64 {
-        // a * b = w * d + rem
-
-        // -- a <= w_ceil_bits + overflow_bits /\ b <= w_ceil_bits + overflow_bits
-        // -> a * b <= w_ceil_bits * 2 + overflow_bits * 2 - 1
-
-        // -- w * d + rem >= a * b
-        // <- d_bits + w_ceil_bits - 2 = w_ceil_bits * 2 + overflow_bits * 2 - 1
-
         let w_max = field_to_bn(&-W::one());
+        let w = &w_max + 1u64;
         let w_ceil_bits = w_max.bits();
+
+        // a * b = w * d + rem
         let d_bits = w_ceil_bits + overflow_bits * 2 + 1;
-        assert!(d_bits + w_ceil_bits - 2 >= w_ceil_bits * 2 + overflow_bits * 2 - 1);
+
+        // To guarantee completeness of int_mul:
+        // max(d) * w + min(rem) >= max(a) * max(b)
+        let max_a = BigUint::from(1u64) << (w_ceil_bits + overflow_bits);
+        let max_b = &max_a;
+        assert!((BigUint::from(1u64) << d_bits) * w >= &max_a * max_b);
+
         d_bits
     }
 

@@ -34,6 +34,7 @@ use std::sync::Arc;
 
 const MAX_ROWS: usize = 1 << 23;
 const SANITY_CHECK: bool = false;
+pub(crate) const OVERFLOW_BITS: u64 = 6;
 
 #[derive(Debug, Clone)]
 pub struct Context<N: FieldExt> {
@@ -170,7 +171,6 @@ impl<W: BaseExt, N: FieldExt> From<IntegerContext<W, N>> for Context<N> {
 
 impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
     pub fn new(ctx: Rc<RefCell<Context<N>>>) -> Self {
-        const OVERFLOW_BITS: u64 = 6;
         Self::new_with_options(ctx, COMMON_RANGE_BITS, OVERFLOW_BITS)
     }
 
