@@ -531,21 +531,8 @@ impl<N: FieldExt> Records<N> {
         range_chip: &RangeChip<N>,
         select_chip: &SelectChip<N>,
     ) -> Result<Option<Vec<Vec<Vec<Option<AssignedCell<N, N>>>>>>, Error> {
-        let max_row = self
-            .base_height
-            .max(self.range_height)
-            .max(self.select_height);
-        let is_assign_for_max_row = self.assign_for_max_row(region, base_chip, max_row)?;
-        if !is_assign_for_max_row {
-            let base_cells = self._assign_to_base_chip(region, base_chip)?;
-            let range_cells = self._assign_to_range_chip(region, range_chip)?;
-            let select_cells = self._assign_to_select_chip(region, select_chip)?;
-            let cells = vec![base_cells, range_cells, select_cells];
-            self._assign_permutation(region, &cells)?;
-            Ok(Some(cells))
-        } else {
-            Ok(None)
-        }
+        let res = self.assign_all(region, base_chip, range_chip, select_chip)?;
+        Ok(Some(res))
     }
 
     pub fn assign_all_with_optional_select_chip(
@@ -978,7 +965,7 @@ impl<N: FieldExt> Records<N> {
         if bits <= COMMON_RANGE_BITS {
             let assigned = self.assign_one_line_range_value(offset, &v[..], v_acc, bits);
             (assigned, 1)
-        } else if bits <= 2 * COMMON_RANGE_BITS {
+        } else if bits < 2 * COMMON_RANGE_BITS {
             unreachable!()
         } else if bits <= 4 * COMMON_RANGE_BITS {
             v.resize(4, N::zero());

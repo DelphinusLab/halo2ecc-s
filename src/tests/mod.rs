@@ -1,7 +1,7 @@
 use ark_std::{end_timer, start_timer};
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
-    circuit::{floor_planner::FlatFloorPlanner, Layouter},
+    circuit::{floor_planner::V1, Layouter},
     dev::MockProver,
     pairing::bn256::{Bn256, Fr, G1Affine},
     plonk::{
@@ -71,10 +71,10 @@ struct TestCircuit<N: FieldExt> {
 
 impl<N: FieldExt> Circuit<N> for TestCircuit<N> {
     type Config = TestChipConfig;
-    type FloorPlanner = FlatFloorPlanner;
+    type FloorPlanner = V1;
 
     fn without_witnesses(&self) -> Self {
-        Self::default()
+        self.clone()
     }
 
     fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {
@@ -129,6 +129,24 @@ pub fn run_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
         Err(e) => panic!("{:#?}", e),
     };
     assert_eq!(prover.verify(), Ok(()));
+}
+
+
+pub fn run_circuit_on_bn256_expect_fail(ctx: Context<Fr>, k: u32) {
+    println!(
+        "offset {} {} {}",
+        ctx.range_offset, ctx.base_offset, ctx.select_offset
+    );
+
+    let circuit = TestCircuit::<Fr> {
+        records: ctx.records,
+    };
+
+    let prover = match MockProver::run(k, &circuit, vec![]) {
+        Ok(prover) => prover,
+        Err(e) => panic!("{:#?}", e),
+    };
+    assert!(prover.verify().is_err());
 }
 
 pub fn bench_circuit_on_bn256(ctx: Context<Fr>, k: u32) {
@@ -193,10 +211,10 @@ struct TestNoSelectCircuit<N: FieldExt> {
 
 impl<N: FieldExt> Circuit<N> for TestNoSelectCircuit<N> {
     type Config = TestNoSelectChipConfig;
-    type FloorPlanner = FlatFloorPlanner;
+    type FloorPlanner = V1;
 
     fn without_witnesses(&self) -> Self {
-        Self::default()
+        self.clone()
     }
 
     fn configure(meta: &mut ConstraintSystem<N>) -> Self::Config {

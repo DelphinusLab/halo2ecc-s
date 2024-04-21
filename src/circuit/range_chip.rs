@@ -60,9 +60,9 @@ pub const RANGE_VALUE_DECOMPOSE_COMMON_PARTS: u64 =
  *  acc_lines = 3 -> acc = v0 + v1 * common_range ^ 1 + v2 * common_range ^ 2 + v3 * common_range ^ 3
  *                            + v4 * common_range ^ 4 + v5 * common_range ^ 5
  *
- *  acc_lines = 1 can limit range in [0, common_range)
- *  acc_lines = 2 can limit range in [common_range ^ 2 - 1, common_range ^ 4)
- *  acc_lines = 3 can limit range in [common_range ^ 3 - 1, common_range ^ 6)
+ *  acc_lines = 1 can limit range bits in [0, common_range_bits]
+ *  acc_lines = 2 can limit range bits in [common_range_bits * 2, common_range_bits * 4]
+ *  acc_lines = 3 can limit range bits in [common_range_bits * 3, common_range_bits * 6]
  */
 #[derive(Clone, Debug)]
 pub struct RangeChipConfig {
@@ -267,7 +267,7 @@ pub trait RangeChipOps<W: BaseExt, N: FieldExt> {
     fn assign_d_leading_limb(&mut self, bn: &BigUint) -> AssignedValue<N>;
 }
 
-fn decompose_bn<N: FieldExt>(bn: &BigUint, decompose: u64, mask: &BigUint) -> (N, Vec<N>) {
+pub fn decompose_bn<N: FieldExt>(bn: &BigUint, decompose: u64, mask: &BigUint) -> (N, Vec<N>) {
     let v = bn_to_field::<N>(bn);
     let mut decompose_v = vec![];
 
