@@ -300,29 +300,6 @@ pub struct Records<N: FieldExt> {
 }
 
 impl<N: FieldExt> Records<N> {
-    fn assign_for_max_row(
-        &self,
-        region: &Region<'_, N>,
-        base_chip: &BaseChip<N>,
-        max_row: usize,
-    ) -> Result<bool, Error> {
-        let adv_cell = region.assign_advice(
-            || "base",
-            base_chip.config.base[0],
-            max_row,
-            || Ok(N::zero()),
-        )?;
-
-        let fix_cell = region.assign_fixed(
-            || "base",
-            base_chip.config.coeff[0],
-            max_row,
-            || Ok(N::zero()),
-        )?;
-
-        Ok(adv_cell.value().is_none() && fix_cell.value().is_none())
-    }
-
     fn _assign_to_base_chip(
         &self,
         region: &Region<'_, N>,
