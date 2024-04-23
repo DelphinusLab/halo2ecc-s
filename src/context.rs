@@ -26,6 +26,7 @@ use halo2_proofs::circuit::AssignedCell;
 use halo2_proofs::circuit::Region;
 use halo2_proofs::plonk::Error;
 use rayon::iter::*;
+use rayon::prelude::ParallelSlice;
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -299,6 +300,12 @@ pub struct Records<N: FieldExt> {
     pub permutations: Vec<(Cell, Cell)>,
 }
 
+// Just used for parallel synthesize.
+struct ParallelWorkAround<N: FieldExt> {
+    ptr: *mut *mut Option<AssignedCell<N, N>>,
+}
+unsafe impl<N: FieldExt> Sync for ParallelWorkAround<N> {}
+
 impl<N: FieldExt> Records<N> {
     fn _assign_to_base_chip(
         &self,
@@ -310,27 +317,43 @@ impl<N: FieldExt> Records<N> {
             .map(|_| vec![None; self.base_height])
             .collect::<Vec<_>>();
 
-        for (row, advs) in self
-            .inner
+        let mut cells_mut_ptr_vec = cells.iter_mut().map(|x| x.as_mut_ptr()).collect::<Vec<_>>();
+        let cells_mut_ptr = ParallelWorkAround {
+            ptr: cells_mut_ptr_vec.as_mut_ptr(),
+        };
+        let _cells_mut_ptr = &cells_mut_ptr;
+
+        let threads = 16;
+        let chunk_size = (self.base_height + threads - 1) / threads;
+        let chunk_num = chunk_size * threads;
+        self.inner
             .base_adv_record
-            .iter()
+            .par_chunks(chunk_size)
+            .take(chunk_num)
             .enumerate()
-            .take(self.base_height)
-        {
-            for (col, adv) in advs.iter().enumerate() {
-                if adv.0.is_some() {
-                    let cell = region.assign_advice(
-                        || "base adv col",
-                        base_chip.config.base[col],
-                        row,
-                        || Ok(adv.0.unwrap()),
-                    )?;
-                    if adv.1 {
-                        cells[col][row] = Some(cell);
+            .for_each(move |(ic, c)| {
+                for (row, advs) in c.iter().enumerate() {
+                    let row = ic * chunk_size + row;
+                    for (col, adv) in advs.iter().enumerate() {
+                        if adv.0.is_some() {
+                            let cell = region
+                                .assign_advice(
+                                    || "base adv col",
+                                    base_chip.config.base[col],
+                                    row,
+                                    || Ok(adv.0.unwrap()),
+                                )
+                                .unwrap();
+                            if adv.1 {
+                                unsafe {
+                                    *(*_cells_mut_ptr.ptr.offset(col as isize))
+                                        .offset(row as isize) = Some(cell);
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        }
+            });
 
         for (row, fixes) in self
             .inner
@@ -369,12 +392,18 @@ impl<N: FieldExt> Records<N> {
             .map(|_| vec![None; self.range_height])
             .collect::<Vec<_>>();
 
+        let mut cells_mut_ptr_vec = cells.iter_mut().map(|x| x.as_mut_ptr()).collect::<Vec<_>>();
+        let cells_mut_ptr = ParallelWorkAround {
+            ptr: cells_mut_ptr_vec.as_mut_ptr(),
+        };
+        let _cells_mut_ptr = &cells_mut_ptr;
+
         for (row, fix) in self
             .inner
             .range_fix_record
             .iter()
             .enumerate()
-            .take(self.range_height)
+            .take(self.range_height + 1)
         {
             for (col, fix) in fix.iter().enumerate() {
                 if let Some(v) = fix {
@@ -388,27 +417,37 @@ impl<N: FieldExt> Records<N> {
             }
         }
 
-        for (row, adv) in self
-            .inner
+        let threads = 16;
+        let chunk_size = (self.base_height + threads - 1) / threads;
+        let chunk_num = chunk_size * threads;
+        self.inner
             .range_adv_record
-            .iter()
+            .par_chunks(chunk_size)
+            .take(chunk_num)
             .enumerate()
-            .take(self.range_height)
-        {
-            for (col, adv) in adv.iter().enumerate() {
-                if let Some(v) = &adv.0 {
-                    let cell = region.assign_advice(
-                        || "range adv col",
-                        range_chip.config.adv_cols[col],
-                        row,
-                        || Ok(*v),
-                    )?;
-                    if adv.1 {
-                        cells[col][row] = Some(cell);
+            .for_each(move |(ic, c)| {
+                for (row, advs) in c.iter().enumerate() {
+                    let row = ic * chunk_size + row;
+                    for (col, adv) in advs.iter().enumerate() {
+                        if adv.0.is_some() {
+                            let cell = region
+                                .assign_advice(
+                                    || "range adv col",
+                                    range_chip.config.adv_cols[col],
+                                    row,
+                                    || Ok(adv.0.unwrap()),
+                                )
+                                .unwrap();
+                            if adv.1 {
+                                unsafe {
+                                    *(*_cells_mut_ptr.ptr.offset(col as isize))
+                                        .offset(row as isize) = Some(cell);
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        }
+            });
 
         Ok(cells)
     }
@@ -428,7 +467,7 @@ impl<N: FieldExt> Records<N> {
             .select_adv_record
             .iter()
             .enumerate()
-            .take(self.select_height)
+            .take(self.select_height + 1)
         {
             if advs[SelectAdvColIndex::ValueCol as usize].0.is_some() {
                 let cell = region.assign_advice(
@@ -459,7 +498,7 @@ impl<N: FieldExt> Records<N> {
             .select_fix_record
             .iter()
             .enumerate()
-            .take(self.select_height)
+            .take(self.select_height + 1)
         {
             if fixes[SelectFixColIndex::EncodeCol as usize].is_some() {
                 region.assign_fixed(
