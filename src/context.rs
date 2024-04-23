@@ -325,6 +325,7 @@ impl<N: FieldExt> Records<N> {
 
         let threads = 16;
         let chunk_size = (self.base_height + threads - 1) / threads;
+        let chunk_size = if chunk_size == 0 { 1 } else { chunk_size };
         let chunk_num = chunk_size * threads;
         self.inner
             .base_adv_record
@@ -419,6 +420,7 @@ impl<N: FieldExt> Records<N> {
 
         let threads = 16;
         let chunk_size = (self.base_height + threads - 1) / threads;
+        let chunk_size = if chunk_size == 0 { 1 } else { chunk_size };
         let chunk_num = chunk_size * threads;
         self.inner
             .range_adv_record
