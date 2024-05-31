@@ -19,17 +19,6 @@ dependencies = [
 
 [[package]]
 name = "ark-std"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1df2c09229cbc5a028b1d70e00fdb2acee28b1055dfb5ca73eea49c5a25c4e7c"
-dependencies = [
- "colored",
- "num-traits",
- "rand",
-]
-
-[[package]]
-name = "ark-std"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
@@ -289,14 +278,14 @@ dependencies = [
 [[package]]
 name = "ec-gpu"
 version = "0.2.0"
-source = "git+https://github.com/lanbones/ec-gpu#165d1dd6215f6fd1dd85c83cf430ff511a03a00a"
+source = "git+https://github.com/lanbones/ec-gpu#36b9abf8611347e2fe44f21a2f3607eba3aed71d"
 
 [[package]]
 name = "ec-gpu-gen"
 version = "0.4.0"
-source = "git+https://github.com/lanbones/ec-gpu?branch=halo2-opt-v2#5481be558da026bb9bddcd5807f973f6b1a8346e"
+source = "git+https://github.com/lanbones/ec-gpu?branch=halo2-opt-v2#e03cdef1dd41bcc251fd46839c41711b0ae2099e"
 dependencies = [
- "ark-std 0.3.0",
+ "ark-std",
  "bitvec",
  "crossbeam-channel",
  "ec-gpu",
@@ -447,7 +436,7 @@ name = "halo2_proofs"
 version = "0.1.0-beta.1"
 source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git#9a81f601607bdc3ff3360a9ad66885c9796f487b"
 dependencies = [
- "ark-std 0.4.0",
+ "ark-std",
  "blake2b_simd",
  "bumpalo",
  "cfg-if 0.1.10",
@@ -475,7 +464,7 @@ dependencies = [
 name = "halo2ecc-s"
 version = "0.3.2"
 dependencies = [
- "ark-std 0.4.0",
+ "ark-std",
  "chrono",
  "halo2_proofs",
  "num-bigint",

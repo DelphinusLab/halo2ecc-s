@@ -11,7 +11,7 @@ halo2_proofs = { git = "https://github.com/DelphinusLab/halo2-gpu-specific.git",
 num-integer = "0.1"
 num-bigint = { version = "0.4", features = ["rand"] }
 rayon = "1.5.2"
-ark-std = {version = "0.4.0", features = ["print-trace"] }
+ark-std = { version = "0.4.0" }
 
 [dev-dependencies]
 chrono = "0.4.19"
@@ -21,4 +21,4 @@ rand_xorshift = "0.3"
 [features]
 default = []
 cuda = ["halo2_proofs/cuda"]
-
+profile = ["ark-std/print-trace", "halo2_proofs/profile"]
