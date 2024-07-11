@@ -35,12 +35,17 @@ pub trait IntegerChipOps<W: BaseExt, N: FieldExt> {
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
     ) -> AssignedInteger<W, N>;
-    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> AssignedInteger<W, N>;
+    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> Option<AssignedInteger<W, N>>;
     fn int_div(
         &mut self,
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
     ) -> (AssignedCondition<N>, AssignedInteger<W, N>);
+    fn int_div_unsafe(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Option<AssignedInteger<W, N>>;
     fn is_pure_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
     fn is_pure_w_modulus(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
     fn is_int_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
@@ -482,12 +487,41 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
         rem
     }
 
-    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
-        //TODO: optimize
+    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> Option<AssignedInteger<W, N>> {
         let one = self.assign_int_constant(W::one());
-        let (c, v) = self.int_div(&one, x);
-        self.ctx.borrow_mut().assert_false(&c);
-        v
+        self.int_div_unsafe(&one, x)
+    }
+
+    fn int_div_unsafe(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Option<AssignedInteger<W, N>> {
+        let info = self.info();
+
+        let a = self.reduce(a);
+
+        let a_bn = self.get_w_bn(&a);
+        let b_bn = self.get_w_bn(&b);
+
+        let b_inv: Option<W> = bn_to_field::<W>(&b_bn).invert().into();
+
+        match b_inv {
+            Some(b_inv) => {
+                let c = bn_to_field::<W>(&a_bn) * b_inv;
+                let c_bn = field_to_bn(&c);
+                let d_bn = (&b_bn * &c_bn - &a_bn) / &info.w_modulus;
+
+                let c = self.assign_w(&c_bn);
+                let d = self.assign_d(&d_bn);
+
+                self.add_constraints_for_mul_equation_on_limbs(&b, &c, &d.0, &a);
+                self.add_constraints_for_mul_equation_on_native(&b, &c, &d.1, &a);
+
+                Some(c)
+            }
+            None => None,
+        }
     }
 
     fn int_div(
