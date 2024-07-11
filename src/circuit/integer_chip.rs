@@ -84,7 +84,7 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
     ) {
         assert!(a.times < self.info().overflow_limit);
         assert!(b.times < self.info().overflow_limit);
-        assert!(rem.times == 1);
+        assert!(rem.times < self.info().overflow_limit);
 
         let info = self.info();
         let one = N::one();
@@ -499,7 +499,15 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
     ) -> Option<AssignedInteger<W, N>> {
         let info = self.info();
 
-        let a = self.reduce(a);
+        let mut b = b.clone();
+
+        // Ensure b > a, so c * b > a and we can find the d that c * b = d * w + a
+        if b.times <= a.times {
+            let assigned_w = self.assign_w(&info.w_modulus);
+            while b.times < a.times {
+                b = self.int_add(&b, &assigned_w);
+            }
+        }
 
         let a_bn = self.get_w_bn(&a);
         let b_bn = self.get_w_bn(&b);
