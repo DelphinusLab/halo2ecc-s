@@ -434,7 +434,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.1.0-beta.1"
-source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git#fe464bd14d7d1155964d39a029c9903b453aeac8"
+source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git?branch=moore/on_prove_pairing#a386c9cc7c0b651d730d2b34b20147b176bf237b"
 dependencies = [
  "ark-std",
  "blake2b_simd",
@@ -691,7 +691,7 @@ dependencies = [
 [[package]]
 name = "pairing_bn256"
 version = "0.1.1"
-source = "git+https://github.com/mooreland/pairing?branch=on_prove_pairing#330616b983350440494e3f22fd0b098ae9e13c65"
+source = "git+https://github.com/lanbones/pairing#30b052f29d7ec3e68e20528584d9495de678ea05"
 dependencies = [
  "bls12_381",
  "ec-gpu",

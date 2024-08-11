@@ -173,7 +173,8 @@ impl NativeScalarEccContext<G1Affine> {
         self.fq12_mul_by_034(f, &(c00, c01), &(c10, c11), &coeffs[2])
     }
 
-    //take -1*y, save 1 coeff allocation
+    // -y + alpha*x*w + bias*w^3 (alpha is slope, w is Fp12 =Fp2[w]/(w^2-u), Fp12 represents in Fp2)
+    // coeffs:[alpha, bias] and exclude neg_one to save 1 circuit allocation
     fn ell_on_prove_pairing(
         &mut self,
         f: &AssignedFq12<Fq, Fr>,
@@ -248,6 +249,9 @@ impl NativeScalarEccContext<G1Affine> {
         f
     }
 
+    // verify miller loop rst by supplied c&wi instead of final exponent
+    // c: lamada-th residual root for miller loop rst f
+    // wi: make sure f*wi be 3-th residual
     fn multi_miller_loop_c_wi(
         &mut self,
         c: &AssignedFq12<Fq, Fr>,
@@ -327,6 +331,8 @@ impl NativeScalarEccContext<G1Affine> {
         f
     }
 
+    // compute miller loop in affine coordinates and verify by c&wi
+    // not including verify for step by step's add/double point
     fn multi_miller_loop_on_prove_pairing(
         &mut self,
         c: &AssignedFq12<Fq, Fr>,

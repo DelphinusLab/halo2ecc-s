@@ -176,6 +176,9 @@ pub trait PairingChipOps<C: CurveAffine, N: FieldExt>:
     }
 }
 
+//pairing refer to "On Proving Pairings"(https://eprint.iacr.org/2024/640.pdf)
+//1. pairing_c_wi: miller loop keep current projective coordinates and only eliminated the final exponent part
+//2. on_prove_pairing: miller loop take affine coordinates scheme and eliminate the final exponent part
 pub trait PairingChipOnProvePairingOps<C: CurveAffine, N: FieldExt>: PairingChipOps<C, N> {
     fn multi_miller_loop_c_wi(
         &mut self,
