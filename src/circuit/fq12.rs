@@ -6,6 +6,7 @@ use halo2_proofs::arithmetic::{BaseExt, FieldExt};
 
 use super::ecc_chip::EccBaseIntegerChipWrapper;
 use crate::assign::{AssignedFq12, AssignedFq2, AssignedFq6};
+use crate::utils::field_to_bn;
 
 pub trait Fq2BnSpecificOps<W: BaseExt, N: FieldExt> {
     fn fq2_mul_by_nonresidue(&mut self, a: &AssignedFq2<W, N>) -> AssignedFq2<W, N>;
@@ -46,6 +47,12 @@ pub trait Fq2ChipOps<W: BaseExt, N: FieldExt>: EccBaseIntegerChipWrapper<W, N> {
         (
             self.base_integer_chip().assign_int_constant(c.0),
             self.base_integer_chip().assign_int_constant(c.1),
+        )
+    }
+    fn fq2_assign_value(&mut self, c: (W, W)) -> AssignedFq2<W, N> {
+        (
+            self.base_integer_chip().assign_w(&field_to_bn(&c.0)),
+            self.base_integer_chip().assign_w(&field_to_bn(&c.1)),
         )
     }
     fn fq2_add(&mut self, a: &AssignedFq2<W, N>, b: &AssignedFq2<W, N>) -> AssignedFq2<W, N> {
@@ -284,6 +291,14 @@ pub trait Fq6ChipOps<W: BaseExt, N: FieldExt>: Fq2ChipOps<W, N> + Fq2BnSpecificO
             self.fq2_assign_constant(c.2),
         )
     }
+
+    fn fq6_assign_value(&mut self, c: ((W, W), (W, W), (W, W))) -> AssignedFq6<W, N> {
+        (
+            self.fq2_assign_value(c.0),
+            self.fq2_assign_value(c.1),
+            self.fq2_assign_value(c.2),
+        )
+    }
 }
 
 pub trait Fq12ChipOps<W: BaseExt, N: FieldExt>: Fq6ChipOps<W, N> + Fq6BnSpecificOps<W, N> {
@@ -455,5 +470,12 @@ pub trait Fq12ChipOps<W: BaseExt, N: FieldExt>: Fq6ChipOps<W, N> + Fq6BnSpecific
         c: (((W, W), (W, W), (W, W)), ((W, W), (W, W), (W, W))),
     ) -> AssignedFq12<W, N> {
         (self.fq6_assign_constant(c.0), self.fq6_assign_constant(c.1))
+    }
+
+    fn fq12_assign_value(
+        &mut self,
+        c: (((W, W), (W, W), (W, W)), ((W, W), (W, W), (W, W))),
+    ) -> AssignedFq12<W, N> {
+        (self.fq6_assign_value(c.0), self.fq6_assign_value(c.1))
     }
 }

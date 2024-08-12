@@ -227,3 +227,20 @@ impl<C: CurveAffine, N: FieldExt> AssignedG2Prepared<C, N> {
         }
     }
 }
+
+pub struct AssignedG2OnProvePrepared<C: CurveAffine, N: FieldExt> {
+    pub coeffs: Vec<[AssignedFq2<C::Base, N>; 2]>,
+    pub init_q: AssignedG2Affine<C, N>,
+    // pub is_identity: AssignedCondition<N>, not support identity
+    _mark: PhantomData<C>,
+}
+
+impl<C: CurveAffine, N: FieldExt> AssignedG2OnProvePrepared<C, N> {
+    pub fn new(coeffs: Vec<[AssignedFq2<C::Base, N>; 2]>, init_q: AssignedG2Affine<C, N>) -> Self {
+        Self {
+            coeffs,
+            init_q,
+            _mark: PhantomData,
+        }
+    }
+}

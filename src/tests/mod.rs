@@ -30,6 +30,7 @@ pub mod integer_chip;
 pub mod native_scalar_ecc_chip;
 pub mod native_scalar_pairing_chip;
 pub mod range_chip;
+mod native_scalar_pairing_chip_on_prove;
 
 fn random<N: BaseExt>() -> N {
     let seed = chrono::offset::Utc::now()
