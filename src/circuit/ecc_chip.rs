@@ -844,16 +844,15 @@ pub trait EccChipBaseOps<C: CurveAffine, N: FieldExt>:
     ) -> Result<AssignedNonZeroPoint<C, N>, UnsafeError> {
         let diff_x = self.base_integer_chip().int_sub(&a.x, &b.x);
         let diff_y = self.base_integer_chip().int_sub(&a.y, &b.y);
-        let (x_eq, tangent) = self.base_integer_chip().int_div(&diff_y, &diff_x);
+        let tangent = self.base_integer_chip().int_div_unsafe(&diff_y, &diff_x);
 
-        // x cannot be same
-        let succeed = self.base_integer_chip().base_chip().try_assert_false(&x_eq);
-        let res = self.lambda_to_point_non_zero(&tangent, a, b);
+        match tangent {
+            Some(tangent) => {
+                let res = self.lambda_to_point_non_zero(&tangent, a, b);
 
-        if succeed {
-            Ok(res)
-        } else {
-            Err(UnsafeError::AddSameOrNegPoint)
+                Ok(res)
+            }
+            None => Err(UnsafeError::AddSameOrNegPoint),
         }
     }
 

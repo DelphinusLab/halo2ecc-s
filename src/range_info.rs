@@ -254,7 +254,7 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
             let lcm = self
                 .n_modulus
                 .lcm(&(BigUint::from(1u64) << (self.limb_bits * self.mul_check_limbs)));
-            let max_rem = &self.w_ceil - 1u64;
+            let max_rem = &self.w_ceil * (self.overflow_limit - 1) - 1u64;
             assert!(lcm > &max_a * max_b);
             assert!(lcm > &max_d * &self.w_modulus + &max_rem);
 
@@ -273,7 +273,7 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
                 .iter()
                 .reduce(|acc, x| acc.max(x))
                 .unwrap();
-            let max_rem_i = &self.limb_modulus - 1u64;
+            let max_rem_i = &self.limb_modulus * (self.overflow_limit - 1) - 1u64;
             assert!(
                 &borrow * &self.limb_modulus - &borrow
                     >= self.limbs * max_d_j * max_w_j + max_rem_i
@@ -285,7 +285,10 @@ impl<W: BaseExt, N: FieldExt> RangeInfo<W, N> {
             let max_v = &self.limb_modulus * common_modulus - 1u64;
             let max_a_j = &self.limb_modulus * (self.overflow_limit - 1);
             let max_b_j = &max_a_j;
-            assert!(&max_v * &self.limb_modulus >= &max_a_j * max_b_j * self.limbs + &self.limb_modulus * &borrow);
+            assert!(
+                &max_v * &self.limb_modulus
+                    >= &max_a_j * max_b_j * self.limbs + &self.limb_modulus * &borrow
+            );
 
             // To avoid overflow
             // max(v) * limb_modulus < n_modulus
