@@ -102,7 +102,7 @@ pub trait Fq2ChipOps<W: BaseExt, N: FieldExt>: EccBaseIntegerChipWrapper<W, N> {
         let t0 = self.base_integer_chip().int_square(&x.0);
         let t1 = self.base_integer_chip().int_square(&x.1);
         let t0 = self.base_integer_chip().int_add(&t0, &t1);
-        let t = self.base_integer_chip().int_unsafe_invert(&t0).unwrap();
+        let t = self.base_integer_chip().int_unsafe_invert(&t0);
         let c0 = self.base_integer_chip().int_mul(&x.0, &t);
         let c1 = self.base_integer_chip().int_mul(&x.1, &t);
         let c1 = self.base_integer_chip().int_neg(&c1);
@@ -303,7 +303,10 @@ pub trait Fq6ChipOps<W: BaseExt, N: FieldExt>: Fq2ChipOps<W, N> + Fq2BnSpecificO
 
 pub trait Fq12ChipOps<W: BaseExt, N: FieldExt>: Fq6ChipOps<W, N> + Fq6BnSpecificOps<W, N> {
     fn fq12_reduce(&mut self, x: &AssignedFq12<W, N>) -> AssignedFq12<W, N> {
-        (self.fq6_reduce(&x.0), self.fq6_reduce(&x.1))
+        (
+            self.fq6_reduce(&x.0),
+            self.fq6_reduce(&x.1),
+        )
     }
     fn fq12_assert_one(&mut self, x: &AssignedFq12<W, N>) {
         let one = self.fq12_assign_one();
