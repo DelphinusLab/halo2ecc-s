@@ -24,6 +24,10 @@ pub trait IntegerChipOps<W: BaseExt, N: FieldExt> {
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
     ) -> AssignedInteger<W, N>;
+    fn int_add_constant_w(
+        &mut self,
+        a: &AssignedInteger<W, N>
+    ) -> AssignedInteger<W, N>;
     fn int_sub(
         &mut self,
         a: &AssignedInteger<W, N>,
@@ -35,12 +39,17 @@ pub trait IntegerChipOps<W: BaseExt, N: FieldExt> {
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
     ) -> AssignedInteger<W, N>;
-    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> AssignedInteger<W, N>;
+    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> Option<AssignedInteger<W, N>>;
     fn int_div(
         &mut self,
         a: &AssignedInteger<W, N>,
         b: &AssignedInteger<W, N>,
     ) -> (AssignedCondition<N>, AssignedInteger<W, N>);
+    fn int_div_unsafe(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Option<AssignedInteger<W, N>>;
     fn is_pure_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
     fn is_pure_w_modulus(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
     fn is_int_zero(&mut self, a: &AssignedInteger<W, N>) -> AssignedCondition<N>;
@@ -79,7 +88,7 @@ impl<W: BaseExt, N: FieldExt> IntegerContext<W, N> {
     ) {
         assert!(a.times < self.info().overflow_limit);
         assert!(b.times < self.info().overflow_limit);
-        assert!(rem.times == 1);
+        assert!(rem.times < self.info().overflow_limit);
 
         let info = self.info();
         let one = N::one();
@@ -387,6 +396,7 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
         b: &AssignedInteger<W, N>,
     ) -> AssignedInteger<W, N> {
         let info = self.info();
+
         let mut limbs = vec![];
 
         for i in 0..self.info().limbs as usize {
@@ -404,6 +414,31 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
 
         self.conditionally_reduce(res)
     }
+
+    fn int_add_constant_w(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+    ) -> AssignedInteger<W, N> {
+        let info = self.info();
+
+        let mut limbs = vec![];
+
+        for i in 0..self.info().limbs as usize {
+            let value = self.ctx.borrow_mut().add_constant(&a.limbs_le[i], info.w_modulus_limbs_le[i]);
+            limbs.push(value)
+        }
+
+        let schemas = limbs.iter().zip(info.limb_coeffs.clone());
+        let native = self
+            .ctx
+            .borrow_mut()
+            .sum_with_constant(schemas.collect(), None);
+
+        let res = AssignedInteger::new(limbs.try_into().unwrap(), native, a.times + 2);
+
+        self.conditionally_reduce(res)
+    }
+
 
     fn int_sub(
         &mut self,
@@ -482,12 +517,49 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
         rem
     }
 
-    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> AssignedInteger<W, N> {
-        //TODO: optimize
+    fn int_unsafe_invert(&mut self, x: &AssignedInteger<W, N>) -> Option<AssignedInteger<W, N>> {
         let one = self.assign_int_constant(W::one());
-        let (c, v) = self.int_div(&one, x);
-        self.ctx.borrow_mut().assert_false(&c);
-        v
+        self.int_div_unsafe(&one, x)
+    }
+
+    fn int_div_unsafe(
+        &mut self,
+        a: &AssignedInteger<W, N>,
+        b: &AssignedInteger<W, N>,
+    ) -> Option<AssignedInteger<W, N>> {
+        let info = self.info();
+
+        let b = self.reduce(b);
+
+        let a_bn = self.get_w_bn(&a);
+        let b_bn = self.get_w_bn(&b);
+        let b_inv: Option<W> = bn_to_field::<W>(&b_bn).invert().into();
+
+        match b_inv {
+            Some(b_inv) => {
+                // Keep zero check in circuit
+                let is_b_zero = self.is_int_zero(&b);
+                self.base_chip().assert_false(&is_b_zero);
+
+                let c = bn_to_field::<W>(&a_bn) * b_inv;
+                let c_bn = field_to_bn(&c);
+                let c = self.assign_w(&c_bn);
+
+                // To ensure b * c > a in check
+                let c_w = self.int_add_constant_w(&c);
+                let b_w = self.int_add_constant_w(&b);
+
+                let mul_bn = (&b_bn + &info.w_modulus) * (&c_bn + &info.w_modulus);
+                let d_bn = (mul_bn - &a_bn) / &info.w_modulus;
+                let d = self.assign_d(&d_bn);
+
+                self.add_constraints_for_mul_equation_on_limbs(&b_w, &c_w, &d.0, &a);
+                self.add_constraints_for_mul_equation_on_native(&b_w, &c_w, &d.1, &a);
+
+                Some(c)
+            }
+            None => None,
+        }
     }
 
     fn int_div(
