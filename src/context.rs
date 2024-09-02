@@ -260,21 +260,28 @@ impl<N: FieldExt> Default for RecordsInner<N> {
             .unwrap_or(MAX_ROWS);
         let max_rows = &_max_rows;
 
-        let res = std::thread::scope(|s| {
-            let base_adv_record = s.spawn(|| vec![[(None, false); VAR_COLUMNS]; *max_rows]);
-            let base_fix_record = s.spawn(|| vec![[None; FIXED_COLUMNS]; *max_rows]);
-            let range_adv_record =
-                s.spawn(|| vec![[(None, false); RANGE_CHIP_ADV_COLUMNS]; *max_rows]);
-            let range_fix_record = s.spawn(|| vec![[None; RANGE_CHIP_FIX_COLUMNS]; *max_rows]);
-            let select_adv_record = s.spawn(|| vec![[(None, false); 2]; *max_rows]);
-            let select_fix_record = s.spawn(|| vec![[None; 2]; *max_rows]);
-
-            let base_adv_record = base_adv_record.join().unwrap();
-            let base_fix_record = base_fix_record.join().unwrap();
-            let range_adv_record = range_adv_record.join().unwrap();
-            let range_fix_record = range_fix_record.join().unwrap();
-            let select_adv_record = select_adv_record.join().unwrap();
-            let select_fix_record = select_fix_record.join().unwrap();
+        let res = {
+            let base_adv_record = (0..*max_rows)
+                .into_par_iter()
+                .map(|_| [(None, false); VAR_COLUMNS])
+                .collect();
+            let base_fix_record = (0..*max_rows)
+                .into_par_iter()
+                .map(|_| [None; FIXED_COLUMNS])
+                .collect();
+            let range_adv_record = (0..*max_rows)
+                .into_par_iter()
+                .map(|_| [(None, false); RANGE_CHIP_ADV_COLUMNS])
+                .collect();
+            let range_fix_record = (0..*max_rows)
+                .into_par_iter()
+                .map(|_| [None; RANGE_CHIP_FIX_COLUMNS])
+                .collect();
+            let select_adv_record = (0..*max_rows)
+                .into_par_iter()
+                .map(|_| [(None, false); 2])
+                .collect();
+            let select_fix_record = (0..*max_rows).into_par_iter().map(|_| [None; 2]).collect();
 
             Self {
                 base_adv_record,
@@ -284,7 +291,7 @@ impl<N: FieldExt> Default for RecordsInner<N> {
                 select_adv_record,
                 select_fix_record,
             }
-        });
+        };
         end_timer!(timer);
 
         res
@@ -314,7 +321,12 @@ impl<N: FieldExt> Records<N> {
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
         let mut cells = (0..VAR_COLUMNS)
             .into_par_iter()
-            .map(|_| vec![None; self.base_height])
+            .map(|_| {
+                (0..self.base_height)
+                    .into_par_iter()
+                    .map(|_| None)
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
 
         let mut cells_mut_ptr_vec = cells.iter_mut().map(|x| x.as_mut_ptr()).collect::<Vec<_>>();
@@ -390,7 +402,12 @@ impl<N: FieldExt> Records<N> {
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
         let mut cells = (0..RANGE_CHIP_ADV_COLUMNS)
             .into_par_iter()
-            .map(|_| vec![None; self.range_height])
+            .map(|_| {
+                (0..self.range_height)
+                    .into_par_iter()
+                    .map(|_| None)
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
 
         let mut cells_mut_ptr_vec = cells.iter_mut().map(|x| x.as_mut_ptr()).collect::<Vec<_>>();
@@ -419,7 +436,7 @@ impl<N: FieldExt> Records<N> {
         }
 
         let threads = 16;
-        let chunk_size = (self.base_height + threads - 1) / threads;
+        let chunk_size = (self.range_height + threads - 1) / threads;
         let chunk_size = if chunk_size == 0 { 1 } else { chunk_size };
         let chunk_num = chunk_size * threads;
         self.inner
@@ -461,7 +478,12 @@ impl<N: FieldExt> Records<N> {
     ) -> Result<Vec<Vec<Option<AssignedCell<N, N>>>>, Error> {
         let mut cells = (0..4)
             .into_par_iter()
-            .map(|_| vec![None; self.select_height])
+            .map(|_| {
+                (0..self.select_height)
+                    .into_par_iter()
+                    .map(|_| None)
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
 
         for (row, advs) in self
