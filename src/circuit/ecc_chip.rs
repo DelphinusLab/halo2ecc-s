@@ -244,7 +244,7 @@ pub trait EccChipScalarOps<C: CurveAffine, N: FieldExt>:
         let rand_line_point_neg = self.ecc_neg_non_zero(&rand_line_point);
         let rand_line_point_neg = self.ecc_reduce_non_zero(&rand_line_point_neg);
 
-        let best_group_size = 5;
+        let best_group_size = 6;
         let n_group = (points.len() + best_group_size - 1) / best_group_size;
         let group_size = (points.len() + n_group - 1) / n_group;
 

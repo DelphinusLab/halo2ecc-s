@@ -354,7 +354,7 @@ impl<W: BaseExt, N: FieldExt> IntegerChipOps<W, N> for IntegerContext<W, N> {
             let (v, v_rem) = u.div_rem(&info.limb_modulus);
             assert!(v_rem == BigUint::from(0u64));
 
-            let v = self.assign_nonleading_limb(&v);
+            let v = self.assign_common(&v);
 
             // constrains on limb_modulus
             self.ctx.borrow_mut().one_line_with_last(
