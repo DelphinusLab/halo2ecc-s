@@ -47,7 +47,7 @@ impl<N: FieldExt> BaseChip<N> {
 
         base.iter().for_each(|c| meta.enable_equality(c.clone()));
 
-        meta.create_gate("base_gate", |meta| {
+        meta.create_gate("plonk_gate", |meta| {
             let _constant = meta.query_fixed(constant, Rotation::cur());
             let _next = meta.query_advice(base[VAR_COLUMNS - 1], Rotation::next());
             let _next_coeff = meta.query_fixed(next_coeff, Rotation::cur());
