@@ -434,7 +434,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.1.0-beta.1"
-source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git#12655ca7406a8c21a154bfd36dd2f8e520c569b1"
+source = "git+https://github.com/DelphinusLab/halo2-gpu-specific.git?branch=moore/logup_extent#4446607ad99dbbf9d105ed65529d54fade9ca467"
 dependencies = [
  "ark-std",
  "blake2b_simd",
